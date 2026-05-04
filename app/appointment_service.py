@@ -3,8 +3,9 @@ from fastapi import HTTPException
 import crud
 from available_slots import delete_pending_slot
 from line_service import send_line_message
+from google_calendar import create_calendar_event
 
-def process_appointment_approval(db: Session, appointment_id: int, action: str):
+def process_appointment_approval(db: Session, appointment_id: int, action: str, calendar_service):
     # 獲取預約資料
     appointment = crud.get_appointment(db, appointment_id)
     if not appointment:
@@ -25,9 +26,23 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str):
     except Exception as e:
         print(f"Redis 解鎖失敗: {e}")
 
-    # line bot message
+    #  判斷付款狀態
     is_paid = (action == "success")
-    msg = "預約成功！已收到您的款項。" if is_paid else "收款逾期，您的預約已取消。請重新預約。"
+    try:
+        if is_paid:
+            msg = "預約成功！已收到您的款項。"
+                # google calendar 建立預約
+            create_calendar_event(
+                service=calendar_service,
+                client_name=updated_appointment.client.name,
+                start_dt=updated_appointment.service_dateTime
+            )
+        else:
+            msg = "收款逾期，您的預約已取消。請重新預約。"
+    except Exception as e:
+            print(f"Google Calendar 同步過程發生錯誤: {e}")
+
+    # line bot message
     send_line_message(updated_appointment.client.line_user_id, msg)
 
     return updated_appointment

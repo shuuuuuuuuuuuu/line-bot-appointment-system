@@ -29,7 +29,7 @@ app = FastAPI()
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://24a9-36-226-106-67.ngrok-free.app",
+    "https://7672-218-172-15-197.ngrok-free.app",
 ]
 
 app.add_middleware(
@@ -123,7 +123,12 @@ async def slot_action(request: Request):
 
 # 業主email觸發line-bot訊息
 @app.get("/approve")
-def handle_approval(token: str, action: str, db: Session = Depends(database.get_db)):
+def handle_approval(
+    token: str, 
+    action: str, 
+    db: Session = Depends(database.get_db), 
+    calendar_service = Depends(get_calendar_service)
+):
     
     payload = verify_token(token)
     if not payload:
@@ -134,7 +139,7 @@ def handle_approval(token: str, action: str, db: Session = Depends(database.get_
         raise HTTPException(status_code=422, detail="缺少預約 ID")
 
     # 2. 呼叫 Service 處理剩餘邏輯
-    process_appointment_approval(db, appointment_id, action)
+    process_appointment_approval(db, appointment_id, action, calendar_service)
     
     return {"message": "Success"}
 

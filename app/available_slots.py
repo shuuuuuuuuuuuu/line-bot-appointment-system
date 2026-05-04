@@ -83,7 +83,7 @@ def get_available_slots_logic(busy_slots, confirmed_slots, pending_slots, db_pen
         # Google 回傳的是 ISO 格式，例如 2026-05-16T12:00:00Z
         b_start = datetime.fromisoformat(busy['start'].replace('Z', '+00:00')).astimezone(TAIPEI_TZ).replace(tzinfo=None)
         # 還有加 buffer time
-        b_end = datetime.fromisoformat(busy['end'].replace('Z', '+00:00')).astimezone(TAIPEI_TZ).replace(tzinfo=None)+ timedelta(minutes=BUFFER_MINUTES)
+        b_end = datetime.fromisoformat(busy['end'].replace('Z', '+00:00')).astimezone(TAIPEI_TZ).replace(tzinfo=None)+ timedelta(minutes=BUFFER)
 
         formatted_busy.append({'start': b_start, 'end': b_end})
 
