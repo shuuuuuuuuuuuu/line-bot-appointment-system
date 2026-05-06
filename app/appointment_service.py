@@ -4,6 +4,7 @@ import crud
 from available_slots import delete_pending_slot
 from line_service import send_line_message
 from google_calendar import create_calendar_event
+from utils import format_appointment_time, get_full_name
 
 def process_appointment_approval(db: Session, appointment_id: int, action: str, calendar_service):
     # 獲取預約資料
@@ -26,15 +27,31 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
     except Exception as e:
         print(f"Redis 解鎖失敗: {e}")
 
+    full_name = get_full_name(updated_appointment.client)
+    time_display = format_appointment_time(updated_appointment.service_dateTime)
+    
     #  判斷付款狀態
     is_paid = (action == "success")
     try:
         if is_paid:
-            msg = "預約成功！已收到您的款項。"
+            msg = f"""預約成功！已收到您的款項           
+我們 {time_display} 線上見😊
+
+🪐幾個注意事項：
+
+1. 閱讀前 24 小時不要飲酒、實用安眠藥或娛樂性藥物。解讀時要保持清醒以達到最佳療癒效果。
+
+2. 解讀過程輕鬆像聊天，也可能在過程中延伸其他問題進行療癒。只需要敞開內心接受宇宙最直接的指引😇
+
+3. 我們會用 Line 語音通話方式進行，請確保閱讀過程在安靜、不受干擾且有良好網路收訊的環境。
+
+4. 可以錄音或做筆記：閱讀過程中會有許多訊息與指引，建議可以透過錄音或筆記記錄下來，之後也能反覆回顧與整理。
+
+希望這場對話可以讓懿敏感受到靈魂深處的智慧與啟發，還有來自宇宙無條件的愛與支持💫🤍"""
                 # google calendar 建立預約
             create_calendar_event(
                 service=calendar_service,
-                client_name=updated_appointment.client.name,
+                client_name=full_name,
                 start_dt=updated_appointment.service_dateTime
             )
         else:

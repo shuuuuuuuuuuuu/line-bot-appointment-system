@@ -1,7 +1,8 @@
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from config import settings
-from auth import create_payment_token
+import schemas
+from utils import format_appointment_time
 
 line_bot_api = LineBotApi(settings.CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(settings.CHANNEL_SECRET)
@@ -20,16 +21,33 @@ def handle_text_message(event):
         TextSendMessage(text=reply_msg)
     )
 
-def send_payment_instruction(line_user_id: str, appointment_id: int):
+def send_payment_instruction(data: schemas.AppointmentCreate):
     
-    token = create_payment_token(appointment_id)
-    # payment_url = f"{settings.PAYMENT_URL}/payment?token={token}"
-    payment_url = "https://drive.google.com/file/d/1xfL9YduhCGqP-JWKgrF203XhHyHOUS-s/view?usp=drive_link"
+    service_text = "、".join(data.service_items)
+    
+    time_display = format_appointment_time(data.service_dateTime)
+    
+    # 簡述問題欄位若為空值則不顯示該列資訊
+    message_row = ""
+    if data.user_message and data.user_message.strip():
+        message_row = f"🔆簡述問題：{data.user_message}\n"
+
     message = (
-        "✅ 預約資料已送出！\n"
+        f"嗨～ {data.first_name}，您的預約資料已送出\n"
+        "感謝您的預約！\n"
         "\n"
-        "請於 10 分鐘內完成付款，連結將於 10 分鐘後失效：\n"
-        f"{payment_url}"
+        f"🔆日期時間：{time_display}\n"
+        f"🔆預約類別：{data.category}\n"
+        f"🔆預約項目：{service_text}\n"
+        f"{message_row}"
         "\n"
+        "💫 提醒您：\n"
+        "請於 1 小時內完成匯款並回覆帳號後五碼，才算預約成功呦 ☑️\n"
+        "逾期將自動取消預約。\n"
+        "\n"
+        "匯款資訊：\n"
+        "🔆 銀行：國泰 013\n"
+        "🔆 帳號：013560086819\n"
+        "🔆 費用：$2,222\n"
     )
-    send_line_message(line_user_id, message)
+    send_line_message(data.line_user_id, message)

@@ -10,16 +10,48 @@
       <el-form :model="form" label-position="top">
         <!-- 法定姓名 -->
         <el-form-item label="法定姓名">
-          <el-input
-            v-model="form.name"
-            placeholder="請輸入您的法定姓名"
-            autofocus
-            @keyup.enter="$event.target.blur()"
-          />
+          <el-row :gutter="10">
+            <el-col :span="8">
+              <el-input
+                v-model="form.lastName"
+                placeholder="姓氏"
+                @keyup.enter="$event.target.blur()"
+              />
+            </el-col>
+            <el-col :span="14">
+              <el-input
+                v-model="form.firstName"
+                placeholder="名稱"
+                @keyup.enter="$event.target.blur()"
+              />
+            </el-col>
+          </el-row>
         </el-form-item>
 
-        <!-- 服務項目（多選） -->
-        <el-form-item label="服務項目">
+        <!-- 服務類別（下拉選單） -->
+        <el-form-item label="服務類別">
+          <el-select
+            v-model="selectedCategoryId"
+            placeholder="請選擇類別"
+            @change="handleCategoryChange"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="cat in categories"
+              :key="cat.id"
+              :label="cat.category_name"
+              :value="cat.id"
+            />
+          </el-select>
+        </el-form-item>
+
+        <!-- 服務時長描述 (淺灰色字體) -->
+        <div class="description-text" v-if="servicesList.length > 0">
+          服務時長約 60 分鐘
+        </div>
+
+        <!-- 服務項目（根據類別動態顯示）（多選） -->
+        <el-form-item label="服務項目" v-if="servicesList.length > 0">
           <el-checkbox-group v-model="form.services" class="service-grid">
             <el-checkbox
               v-for="service in servicesList"
@@ -30,6 +62,18 @@
               {{ service.service_name }}
             </el-checkbox>
           </el-checkbox-group>
+        </el-form-item>
+
+        <!-- 問題簡述（Input 框） -->
+        <el-form-item label="問題簡述" v-if="selectedCategoryId === 1">
+          <el-input
+            v-model="form.user_message"
+            type="textarea"
+            :rows="3"
+            placeholder="請簡述您想詢問的問題（若選「其他」請務必填寫）"
+            maxlength="500"
+            show-word-limit
+          />
         </el-form-item>
 
         <!-- 日期選擇 (限制今天起一個月內) -->
@@ -65,31 +109,6 @@
           此日期目前無可用時段或為公休日。
         </p>
 
-        <!-- 服務時長 -->
-        <el-form-item label="服務時長">
-          <div style="min-height: 40px">
-            <!-- 固定高度防止跳動 -->
-            <transition name="el-zoom-in-center">
-              <el-tag v-if="canSubmit" type="info" size="large">60 分鐘</el-tag>
-            </transition>
-          </div>
-        </el-form-item>
-
-        <!-- 服務金額 -->
-        <el-form-item label="服務金額">
-          <div style="min-height: 40px">
-            <transition name="el-zoom-in-center">
-              <el-tag
-                v-if="canSubmit"
-                type="primary"
-                size="large"
-                effect="plain"
-                >$ 2,222</el-tag
-              >
-            </transition>
-          </div>
-        </el-form-item>
-
         <!-- 置中提交按鈕 -->
         <div class="submit-area">
           <el-button
@@ -122,46 +141,54 @@ const api = axios.create({
   },
 });
 
-// 1. 表單資料狀態
 const form = reactive({
-  name: "",
+  lastName: "",
+  firstName: "",
   services: [],
+  user_message: "",
   date: "",
   time: "",
 });
 
-// 2. UI 狀態與資料列表
 const lineUserId = ref("");
+const categories = ref([]);
 const servicesList = ref([]);
-const availableSlots = ref([]); // 只保留這一個宣告
-const loading = ref(false); // 只保留這一個宣告
-const submitting = ref(false); // 只保留這一個宣告
+const selectedCategoryId = ref(null);
+const availableSlots = ref([]);
+const loading = ref(false);
+const submitting = ref(false);
 
-// --- 從後端獲取服務項目 ---
-const fetchServices = async () => {
+// --- 取得所有類別 ---
+const fetchCategories = async () => {
   try {
-    const response = await api.get("/services");
-    servicesList.value = response.data;
+    const response = await api.get("/categories");
+    categories.value = response.data;
   } catch (error) {
-    console.error("獲取服務列表失敗:", error);
-    ElMessage.error("無法載入服務項目，請檢查後端連線");
+    console.error("獲取類別失敗:", error);
   }
 };
 
-// 頁面初始化時執行
+// --- 當類別切換時，取得對應服務 ---
+const handleCategoryChange = async (catId) => {
+  form.services = []; // 清空已選服務
+  servicesList.value = [];
+  try {
+    const response = await api.get(`/services/filter?category_id=${catId}`);
+    servicesList.value = response.data;
+  } catch (error) {
+    console.error("過濾服務項目失敗:", error);
+    ElMessage.error("無法取得該類別的服務項目");
+  }
+};
+
 onMounted(async () => {
-  await fetchServices();
+  await fetchCategories(); // 改為先抓類別
 
   try {
-    // 這裡填入你在 LINE Developers Console 申請的 LIFF ID
     await liff.init({ liffId: "2009928780-6PHEbZpr" });
-
     if (liff.isLoggedIn()) {
       const context = liff.getContext();
-      if (context) {
-        lineUserId.value = context.userId;
-        console.log("成功取得 UserId:", lineUserId.value);
-      }
+      if (context) lineUserId.value = context.userId;
     } else {
       liff.login();
     }
@@ -170,26 +197,18 @@ onMounted(async () => {
   }
 });
 
-// --- 日期限制邏輯 ---
 const disabledDateLogic = (time) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
   const oneMonthLater = new Date();
   oneMonthLater.setMonth(today.getMonth() + 1);
-  oneMonthLater.setHours(23, 59, 59, 999);
-
   const isPast = time.getTime() < today.getTime();
   const isTooFar = time.getTime() > oneMonthLater.getTime();
-  const day = time.getDay();
-  const isOffDay = [5, 6, 0].includes(day);
-
+  const isOffDay = [5, 6, 0].includes(time.getDay());
   return isPast || isTooFar || isOffDay;
 };
 
-// --- 抓取時段 ---
 const handleDateChange = async (val) => {
-  // 如果更換日期前已經有點選時段，釋放它
   if (form.date && form.time) {
     api.post("/api/slot/action", {
       date: form.date,
@@ -197,99 +216,83 @@ const handleDateChange = async (val) => {
       action: "reject",
     });
   }
-
   if (!val) {
     availableSlots.value = [];
     return;
   }
-
   loading.value = true;
   form.time = "";
   try {
     const response = await api.get(`/available-slots?date=${val}`);
     availableSlots.value = response.data.available_slots;
   } catch (error) {
-    console.error("抓取時段錯誤:", error);
-    ElMessage.error("無法取得預約時段，請稍後再試");
+    ElMessage.error("無法取得時段");
   } finally {
     loading.value = false;
   }
 };
 
-// 修改時間選擇的點擊邏輯
 const handleSlotClick = async (slot) => {
-  // 如果點選的是已經選中的，不做事
   if (form.time === slot) return;
-
-  const oldSlot = form.time; // 備份舊時段，用於失敗回退
-  form.time = slot; // 先更新 UI
-
+  form.time = slot;
   try {
     const res = await api.post("/api/slot/lock", {
       date: form.date,
       time: slot,
       userId: lineUserId.value,
     });
-
     if (!res.data.success) {
-      ElMessage.warning("該時段剛被選走，請選擇其他時段");
-      form.time = ""; // 清除選取
-      handleDateChange(form.date); // 刷新可用清單
+      ElMessage.warning("該時段剛被選走");
+      form.time = "";
+      handleDateChange(form.date);
     } else {
-      // 鎖定成功
-      ElMessage.success({ message: "時段已為您保留 10 分鐘", duration: 2000 });
+      ElMessage.success({ message: "時段已保留 10 分鐘", duration: 2000 });
     }
   } catch (error) {
-    ElMessage.error("時段鎖定失敗");
+    ElMessage.error("鎖定失敗");
     form.time = "";
   }
 };
 
-// --- 提交按鈕狀態 ---
 const canSubmit = computed(() => {
   return (
-    form.name.trim() !== "" &&
+    form.lastName.trim() !== "" &&
+    form.firstName.trim() !== "" &&
+    selectedCategoryId.value !== null &&
     form.services.length > 0 &&
     form.date !== "" &&
     form.time !== ""
   );
 });
 
-// --- 提交表單 ---
 const submitForm = async () => {
   submitting.value = true;
 
-  // 1. 轉換 service_items 格式
-  // 比對 servicesList 中的所有項目，如果存在於 form.services 陣列中，則 selected 為 true
-  const formattedServiceItems = servicesList.value.map((service) => ({
-    name: service.service_name,
-    selected: form.services.includes(service.service_name),
-  }));
+  // 取得目前選中的類別名稱
+  const currentCategory = categories.value.find(
+    (c) => c.id === selectedCategoryId.value
+  );
 
-  // 2. 組合最終要送出的 Payload
   const payload = {
     line_user_id: lineUserId.value,
-    name: form.name,
-    service_items: formattedServiceItems,
-    total_price: 2222, // 如果有計價邏輯可在此計算
+    last_name: form.lastName,
+    first_name: form.firstName,
+    category: currentCategory ? currentCategory.category_name : "",
+    service_items: form.services,
+    user_message: form.user_message,
+    total_price: 2222,
     total_duration: 60,
-    service_dateTime: `${form.date}T${form.time}:00`, // 格式化為 ISO 樣式
+    service_dateTime: `${form.date}T${form.time}:00`,
   };
 
-  console.log("提交給後端的完整格式:", payload);
-
   try {
-    const response = await api.post("/appointments/", payload);
+    await api.post("/appointments/", payload);
     ElMessage.success("已提交預約");
-
     setTimeout(() => {
-      if (liff.isInClient()) {
-        liff.closeWindow();
-      }
+      if (liff.isInClient()) liff.closeWindow();
     }, 1000);
   } catch (error) {
-    console.error("提交失敗:", error);
-    ElMessage.error("提交失敗，請稍後再試");
+    ElMessage.error("提交失敗");
   } finally {
     submitting.value = false;
   }
@@ -303,6 +306,7 @@ const submitForm = async () => {
   grid-template-columns: 1fr 1fr; /* 分成兩等份 */
   gap: 2px 20px; /* 垂直間距 10px，水平間距 20px */
   width: 100%;
+  margin-top: 5px;
 }
 
 /* 修正 Element Plus 預設 Checkbox 的間距，確保置左對齊 */
@@ -364,5 +368,13 @@ const submitForm = async () => {
   margin-top: 30px;
   display: flex;
   justify-content: center;
+}
+
+.description-text {
+  font-size: 13px;
+  color: #909399;
+  margin-top: -10px;
+  margin-bottom: 10px;
+  text-align: left;
 }
 </style>

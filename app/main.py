@@ -18,6 +18,7 @@ from line_service import handler, line_bot_api, send_line_message, send_payment_
 from linebot.exceptions import InvalidSignatureError
 from auth import verify_token
 from appointment_service import process_appointment_approval
+from utils import get_full_name
 
 
 # 自動建立資料表 (若資料庫中尚不存在)
@@ -40,6 +41,17 @@ app.add_middleware(
     allow_headers=["*"], 
 )
 
+# 類別下拉選單
+@app.get("/categories", response_model=List[schemas.Category])
+def list_categories(db: Session = Depends(database.get_db)):
+    return crud.get_categories(db)
+
+# 依類別抓取服務項目
+@app.get("/services/filter", response_model=List[schemas.Service])
+def filter_services(category_id: int, db: Session = Depends(database.get_db)):
+    return crud.get_services_by_category_id(db, cat_id=category_id)
+
+# 可預約服務時段
 @app.get("/available-slots")
 def read_slots(date: str, db: Session = Depends(database.get_db), service = Depends(get_calendar_service)): 
     try:
@@ -64,12 +76,6 @@ def read_slots(date: str, db: Session = Depends(database.get_db), service = Depe
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 讀取services table
-@app.get("/services", response_model=List[schemas.Service])
-def read_services(db: Session = Depends(database.get_db)):
-    return crud.get_services(db)
-
-
 # 建立預約資料
 @app.post("/appointments/", response_model=schemas.Appointment)
 def create_appointment(
@@ -83,12 +89,13 @@ def create_appointment(
         # 發送付款連結給預約者
         background_tasks.add_task(
             send_payment_instruction, 
-            data.line_user_id,
-            appointment.id
+            data
         )
 
+        full_name = get_full_name(data)
+
         # email通知業主有新預約
-        background_tasks.add_task(send_owner_notification, appointment.id, data.name)
+        background_tasks.add_task(send_owner_notification, appointment.id, full_name)
         
         return appointment
     

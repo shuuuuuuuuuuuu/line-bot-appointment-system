@@ -2,6 +2,14 @@ from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta
 import models, schemas
 
+# 查詢所有分類
+def get_categories(db: Session):
+    return db.query(models.Category).all()
+
+# 查詢特定分類的服務
+def get_services_by_category_id(db: Session, cat_id: int):
+    return db.query(models.Service).filter(models.Service.category_id == cat_id).all()
+
 # 建立預約資料
 def create_appointment(db: Session, data: schemas.AppointmentCreate):
     try:
@@ -10,7 +18,7 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
         print(f"正在搜尋 Client: {data.line_user_id}")
         db_client = db.query(models.Client).filter(models.Client.line_user_id == data.line_user_id).first()
         if not db_client:
-            db_client = models.Client(line_user_id=data.line_user_id, name=data.name)
+            db_client = models.Client(line_user_id=data.line_user_id, last_name=data.last_name, first_name=data.first_name)
             db.add(db_client)
             db.flush() 
         
@@ -21,18 +29,14 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
             paid=False,       
             service_dateTime=data.service_dateTime, 
             total_duration=data.total_duration,
+            user_message=data.user_message,
         )
         db.add(db_appointment)
         db.flush() 
 
-        # 篩選 selected=True
-        print(f"準備處理服務項目，共有 {len(data.service_items)} 筆")
-        selected_services = [item for item in data.service_items if item.selected]
-        
-        for item in selected_services:
+        for s_name in data.service_items:
             # 找 service.id
-            print(f"正在找服務: {item.name}")
-            service = db.query(models.Service).filter(models.Service.service_name == item.name).first()
+            service = db.query(models.Service).filter(models.Service.service_name == s_name).first()
             if service:
                 db_item = models.AppointmentItem(
                     appointment_id=db_appointment.id,
@@ -80,9 +84,6 @@ def update_appointment_status(db: Session, appointment_id: int, action: str):
 # 查詢特定id預約
 def get_appointment(db: Session, appointment_id: int):
     return db.query(models.Appointment).options(joinedload(models.Appointment.client)).filter(models.Appointment.id == appointment_id).first()
-
-def get_services(db: Session):
-    return db.query(models.Service).all()
 
 # 查詢付款狀態
 def get_confirmed_slots(db: Session, date_str: str):
