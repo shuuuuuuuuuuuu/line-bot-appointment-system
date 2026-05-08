@@ -1,6 +1,5 @@
-# test_db.py
-from database import engine
-from models import Base, Client, Service, Appointment, AppointmentItem 
+from core.database import engine
+from db.models import Base, Client, Service, Appointment, AppointmentItem 
 # 重點：必須 import 具體的 class，Base 才會知道要建哪些表
 
 def force_create():

@@ -1,8 +1,8 @@
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from config import settings
-import schemas
-from utils import format_appointment_time
+from core.config import settings
+import db.schemas
+from common.utils import format_appointment_time
 
 line_bot_api = LineBotApi(settings.CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(settings.CHANNEL_SECRET)
@@ -21,7 +21,7 @@ def handle_text_message(event):
         TextSendMessage(text=reply_msg)
     )
 
-def send_payment_instruction(data: schemas.AppointmentCreate):
+def send_payment_instruction(data: db.schemas.AppointmentCreate):
     
     service_text = "、".join(data.service_items)
     

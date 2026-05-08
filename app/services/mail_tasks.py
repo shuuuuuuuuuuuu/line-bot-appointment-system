@@ -1,8 +1,8 @@
 import logging
-from config import settings 
+from core.config import settings 
 from fastapi_mail import MessageSchema
-from mail import fm
-from auth import create_access_token
+from services.mail import fm
+from core.security import create_access_token
 
 logger = logging.getLogger("uvicorn")
 

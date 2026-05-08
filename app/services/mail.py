@@ -10,7 +10,7 @@ if not hasattr(builtins, 'SecretStr'):
     builtins.SecretStr = SecretStr
 
 from fastapi_mail import FastMail, ConnectionConfig
-from config import settings
+from core.config import settings
 
 conf = ConnectionConfig(
     MAIL_USERNAME=settings.MAIL_USERNAME,

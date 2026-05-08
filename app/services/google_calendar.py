@@ -3,18 +3,17 @@ from datetime import timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from config import settings  
+from core.config import settings  
 
 def get_calendar_service():
 
     creds = None
     token_path = 'token.json'
     
-    # list
-    scopes = [settings.GOOGLE_CALENDAR_SCOPES]
+    GOOGLE_CALENDAR_SCOPES=["https://www.googleapis.com/auth/calendar"]
 
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, scopes)
+        creds = Credentials.from_authorized_user_file(token_path, GOOGLE_CALENDAR_SCOPES)
     
     # 檢查並更新過期的 Token
     if not creds or not creds.valid:

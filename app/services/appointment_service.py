@@ -1,14 +1,14 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-import crud
-from available_slots import delete_pending_slot
-from line_service import send_line_message
-from google_calendar import create_calendar_event
-from utils import format_appointment_time, get_full_name
+import db.repository
+from services.available_slots import delete_pending_slot
+from services.line_service import send_line_message
+from services.google_calendar import create_calendar_event
+from common.utils import format_appointment_time, get_full_name
 
 def process_appointment_approval(db: Session, appointment_id: int, action: str, calendar_service):
     # 獲取預約資料
-    appointment = crud.get_appointment(db, appointment_id)
+    appointment = repository.get_appointment(db, appointment_id)
     if not appointment:
         raise HTTPException(status_code=404, detail="找不到此預約")
     
@@ -16,7 +16,7 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
         raise HTTPException(status_code=400, detail="此預約缺乏關聯的客戶資料")
 
     # 更新 db paid / expired
-    updated_appointment = crud.update_appointment_status(db, appointment_id, action)
+    updated_appointment = repository.update_appointment_status(db, appointment_id, action)
     if not updated_appointment:
         raise HTTPException(status_code=500, detail="資料庫更新失敗")
 

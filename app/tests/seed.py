@@ -1,5 +1,5 @@
-from database import SessionLocal
-import models
+from core.database import SessionLocal
+import db.models
 
 def seed_services():
     db = SessionLocal()

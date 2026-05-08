@@ -1,24 +1,24 @@
-from mail import fm 
+from services.mail import fm 
 
 from sqlalchemy.orm import Session
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from config import settings
+from core.config import settings
 from typing import List
 
-import database
-import schemas
-import crud
-from models import Base
-from database import engine
-from google_calendar import get_calendar_service
-from available_slots import get_available_slots_logic, get_busy_slots, get_pending_slots, delete_pending_slot, try_lock_slot
-from mail_tasks import send_owner_notification
-from line_service import handler, line_bot_api, send_line_message, send_payment_instruction
+import core.database
+import db.schemas
+import db.repository
+from db.models import Base
+from core.database import engine
+from services.google_calendar import get_calendar_service
+from services.available_slots import get_available_slots_logic, get_busy_slots, get_pending_slots, delete_pending_slot, try_lock_slot
+from services.mail_tasks import send_owner_notification
+from services.line_service import handler, line_bot_api, send_line_message, send_payment_instruction
 from linebot.exceptions import InvalidSignatureError
-from auth import verify_token
-from appointment_service import process_appointment_approval
-from utils import get_full_name
+from core.security import verify_token
+from services.appointment_service import process_appointment_approval
+from common.utils import get_full_name
 
 
 # 自動建立資料表 (若資料庫中尚不存在)
@@ -30,7 +30,7 @@ app = FastAPI()
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://7672-218-172-15-197.ngrok-free.app",
+    "https://6aca-36-226-106-229.ngrok-free.app",
 ]
 
 app.add_middleware(
@@ -42,24 +42,24 @@ app.add_middleware(
 )
 
 # 類別下拉選單
-@app.get("/categories", response_model=List[schemas.Category])
-def list_categories(db: Session = Depends(database.get_db)):
-    return crud.get_categories(db)
+@app.get("/categories", response_model=List[db.schemas.Category])
+def list_categories(db: Session = Depends(core.database.get_db)):
+    return repository.get_categories(db)
 
 # 依類別抓取服務項目
-@app.get("/services/filter", response_model=List[schemas.Service])
-def filter_services(category_id: int, db: Session = Depends(database.get_db)):
-    return crud.get_services_by_category_id(db, cat_id=category_id)
+@app.get("/services/filter", response_model=List[db.schemas.Service])
+def filter_services(category_id: int, db: Session = Depends(core.database.get_db)):
+    return repository.get_services_by_category_id(db, cat_id=category_id)
 
 # 可預約服務時段
 @app.get("/available-slots")
-def read_slots(date: str, db: Session = Depends(database.get_db), service = Depends(get_calendar_service)): 
+def read_slots(date: str, db: Session = Depends(core.database.get_db), service = Depends(get_calendar_service)): 
     try:
 
         busy_slots = get_busy_slots(service, date)           
         pending_slots = get_pending_slots(date)             
-        confirmed_slots = crud.get_confirmed_slots(db, date) 
-        db_pending_slots = crud.get_db_pending_slots(db, date)
+        confirmed_slots = repository.get_confirmed_slots(db, date) 
+        db_pending_slots = repository.get_db_pending_slots(db, date)
 
         available = get_available_slots_logic(
             busy_slots, 
@@ -77,14 +77,14 @@ def read_slots(date: str, db: Session = Depends(database.get_db), service = Depe
 
 
 # 建立預約資料
-@app.post("/appointments/", response_model=schemas.Appointment)
+@app.post("/appointments/", response_model=db.schemas.Appointment)
 def create_appointment(
-    data: schemas.AppointmentCreate, 
+    data: db.schemas.AppointmentCreate, 
     background_tasks: BackgroundTasks,
-    db: Session = Depends(database.get_db)):
+    db: Session = Depends(core.database.get_db)):
 
     try:
-        appointment = crud.create_appointment(db, data)
+        appointment = repository.create_appointment(db, data)
         
         # 發送付款連結給預約者
         background_tasks.add_task(
@@ -133,7 +133,7 @@ async def slot_action(request: Request):
 def handle_approval(
     token: str, 
     action: str, 
-    db: Session = Depends(database.get_db), 
+    db: Session = Depends(core.database.get_db), 
     calendar_service = Depends(get_calendar_service)
 ):
     

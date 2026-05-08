@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta
-import models, schemas
+import db.models, db.schemas
 
 # 查詢所有分類
 def get_categories(db: Session):
@@ -11,7 +11,7 @@ def get_services_by_category_id(db: Session, cat_id: int):
     return db.query(models.Service).filter(models.Service.category_id == cat_id).all()
 
 # 建立預約資料
-def create_appointment(db: Session, data: schemas.AppointmentCreate):
+def create_appointment(db: Session, data: db.schemas.AppointmentCreate):
     try:
         print("--- 開始建立預約 ---")
         # 如果沒有資料 -> 建立一筆 Client

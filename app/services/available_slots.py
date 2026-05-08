@@ -1,7 +1,7 @@
 import redis
 from datetime import datetime, timedelta
 import pytz
-from config import settings
+from core.config import settings
 
 # 設定時區
 TAIPEI_TZ = pytz.timezone('Asia/Taipei')

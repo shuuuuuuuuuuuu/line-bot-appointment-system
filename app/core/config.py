@@ -25,9 +25,6 @@ class Settings:
     JWT_SECRET = os.getenv("JWT_SECRET")
     ALGORITHM = "HS256"
 
-    # google calendar
-    GOOGLE_CALENDAR_SCOPES = os.getenv("GOOGLE_CALENDAR_SCOPES", "https://www.googleapis.com/auth/calendar")
-
     # payment url
     PAYMENT_URL = os.getenv("PAYMENT_URL")
 

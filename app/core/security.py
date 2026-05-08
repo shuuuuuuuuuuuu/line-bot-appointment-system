@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from config import settings
+from core.config import settings
 
 SECRET_KEY = settings.JWT_SECRET # 假設統一用這個
 
