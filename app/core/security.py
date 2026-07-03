@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from core.config import settings
+from core.logging import get_logger
 
-SECRET_KEY = settings.JWT_SECRET # 假設統一用這個
+logger = get_logger("security")
+
+SECRET_KEY = settings.JWT_SECRET
 
 # email確認付款狀態
 def create_access_token(data: dict, expires_delta: timedelta = None):
@@ -10,7 +13,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(days=7) # 預設 7 天過期
+        expire = datetime.utcnow() + timedelta(days=7)
     
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -21,4 +24,5 @@ def verify_token(token: str):
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM])
         return payload
     except JWTError:
+        logger.warning("JWT 驗證失敗")
         return None

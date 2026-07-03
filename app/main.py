@@ -3,15 +3,17 @@ from services.mail import fm
 from sqlalchemy.orm import Session
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from core.config import settings
+from core.logging import setup_logging, get_logger
 from typing import List
 
 import core.database
 import db.schemas
-import db.repository
+from db import repository
 from db.models import Base
-from core.database import engine
-from services.google_calendar import get_calendar_service
+from core.database import engine, get_db
+from services.google_calendar_service import get_calendar_service
 from services.available_slots import get_available_slots_logic, get_busy_slots, get_pending_slots, delete_pending_slot, try_lock_slot
 from services.mail_tasks import send_owner_notification
 from services.line_service import handler, line_bot_api, send_line_message, send_payment_instruction
@@ -20,17 +22,18 @@ from core.security import verify_token
 from services.appointment_service import process_appointment_approval
 from common.utils import get_full_name
 
+setup_logging()
+logger = get_logger("main")
 
 # 自動建立資料表 (若資料庫中尚不存在)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# 允許 Vue 開發環境的來源
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://6aca-36-226-106-229.ngrok-free.app",
+    "https://4737-36-231-70-14.ngrok-free.app",
 ]
 
 app.add_middleware(
@@ -41,22 +44,39 @@ app.add_middleware(
     allow_headers=["*"], 
 )
 
-# 類別下拉選單
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        raise exc
+    logger.error(
+        "未處理的錯誤 %s %s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
+
 @app.get("/categories", response_model=List[db.schemas.Category])
 def list_categories(db: Session = Depends(core.database.get_db)):
     return repository.get_categories(db)
 
-# 依類別抓取服務項目
 @app.get("/services/filter", response_model=List[db.schemas.Service])
 def filter_services(category_id: int, db: Session = Depends(core.database.get_db)):
     return repository.get_services_by_category_id(db, cat_id=category_id)
 
-# 可預約服務時段
 @app.get("/available-slots")
-def read_slots(date: str, db: Session = Depends(core.database.get_db), service = Depends(get_calendar_service)): 
+def read_slots(date: str, db: Session = Depends(core.database.get_db)): 
     try:
+        busy_slots = []
+        try:
+            service_gen = get_calendar_service()
+            service = next(service_gen)
+            busy_slots = get_busy_slots(service, date)
+        except Exception as e:
+            logger.warning("Google Calendar 不可用 (%s)，使用空的 busy slots", e)
 
-        busy_slots = get_busy_slots(service, date)           
         pending_slots = get_pending_slots(date)             
         confirmed_slots = repository.get_confirmed_slots(db, date) 
         db_pending_slots = repository.get_db_pending_slots(db, date)
@@ -72,11 +92,10 @@ def read_slots(date: str, db: Session = Depends(core.database.get_db), service =
         return {"available_slots": available}
     
     except Exception as e:
-        print(f"ERROR in read_slots: {e}") 
+        logger.error("取得可預約時段失敗 (date=%s): %s", date, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 建立預約資料
 @app.post("/appointments/", response_model=db.schemas.Appointment)
 def create_appointment(
     data: db.schemas.AppointmentCreate, 
@@ -86,30 +105,26 @@ def create_appointment(
     try:
         appointment = repository.create_appointment(db, data)
         
-        # 發送付款連結給預約者
         background_tasks.add_task(
             send_payment_instruction, 
             data
         )
 
         full_name = get_full_name(data)
-
-        # email通知業主有新預約
         background_tasks.add_task(send_owner_notification, appointment.id, full_name)
         
         return appointment
     
     except Exception as e:
-        print(f"DEBUG ERROR: {e}") 
+        logger.error("建立預約失敗: %s", e, exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
-# 鎖定點擊時段
 @app.post("/api/slot/lock")
 async def lock_slot(request: Request):
     data = await request.json()
     date_str = data.get('date')
     time_str = data.get('time')
-    user_id = data.get('userId') # 來自 LIFF
+    user_id = data.get('userId')
 
     if not date_str or not time_str:
         raise HTTPException(status_code=400, detail="日期與時間為必填")
@@ -118,7 +133,6 @@ async def lock_slot(request: Request):
 
     return result
 
-# 更換日期的釋放
 @app.post("/api/slot/action")
 async def slot_action(request: Request):
     data = await request.json()
@@ -128,15 +142,12 @@ async def slot_action(request: Request):
     return {"success": False}
 
 
-# 業主email觸發line-bot訊息
 @app.get("/approve")
 def handle_approval(
     token: str, 
     action: str, 
-    db: Session = Depends(core.database.get_db), 
-    calendar_service = Depends(get_calendar_service)
+    db: Session = Depends(core.database.get_db),
 ):
-    
     payload = verify_token(token)
     if not payload:
         raise HTTPException(status_code=403, detail="無效或過期的連結")
@@ -145,13 +156,18 @@ def handle_approval(
     if not appointment_id:
         raise HTTPException(status_code=422, detail="缺少預約 ID")
 
-    # 2. 呼叫 Service 處理剩餘邏輯
+    calendar_service = None
+    try:
+        service_gen = get_calendar_service()
+        calendar_service = next(service_gen)
+    except Exception as e:
+        logger.warning("核准流程略過 Google Calendar (%s)", e)
+
     process_appointment_approval(db, appointment_id, action, calendar_service)
     
     return {"message": "Success"}
 
 
-# LINE Webhook 路由
 @app.post("/callback")
 async def callback(request: Request):
     signature = request.headers['X-Line-Signature']
@@ -161,7 +177,11 @@ async def callback(request: Request):
     try:
         handler.handle(body_str, signature)
     except InvalidSignatureError:
+        logger.warning("LINE webhook signature 驗證失敗")
         raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        logger.error("LINE webhook 處理失敗: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Webhook handler error")
     
     return 'OK'
 
