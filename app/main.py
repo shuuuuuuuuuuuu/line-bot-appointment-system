@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from core.config import settings
 from core.logging import setup_logging, get_logger
+from core.request_logging import RequestLoggingMiddleware
 from typing import List
 
 import core.database
@@ -43,6 +44,7 @@ app.add_middleware(
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.exception_handler(Exception)

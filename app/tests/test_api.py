@@ -4,6 +4,16 @@ def test_health(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_request_logging_emits_access_log(client, seeded_db, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="line_bot.access"):
+        response = client.get("/categories")
+
+    assert response.status_code == 200
+    assert any("GET /categories 200" in record.message for record in caplog.records)
+
+
 def test_categories_empty(client):
     response = client.get("/categories")
     assert response.status_code == 200
