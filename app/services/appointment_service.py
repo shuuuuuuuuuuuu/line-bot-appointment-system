@@ -1,13 +1,15 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-import db.repository
+from db import repository
 from services.available_slots import delete_pending_slot
 from services.line_service import send_line_message
-from services.google_calendar import create_calendar_event
+from services.google_calendar_service import create_calendar_event
 from common.utils import format_appointment_time, get_full_name
+from core.logging import get_logger
+
+logger = get_logger("appointment_service")
 
 def process_appointment_approval(db: Session, appointment_id: int, action: str, calendar_service):
-    # 獲取預約資料
     appointment = repository.get_appointment(db, appointment_id)
     if not appointment:
         raise HTTPException(status_code=404, detail="找不到此預約")
@@ -15,26 +17,22 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
     if not hasattr(appointment, 'client') or not appointment.client:
         raise HTTPException(status_code=400, detail="此預約缺乏關聯的客戶資料")
 
-    # 更新 db paid / expired
     updated_appointment = repository.update_appointment_status(db, appointment_id, action)
     if not updated_appointment:
         raise HTTPException(status_code=500, detail="資料庫更新失敗")
 
-    # 釋放 Redis 鎖定
     try:
         service_dt = updated_appointment.service_dateTime
         delete_pending_slot(service_dt.strftime("%Y-%m-%d"), service_dt.strftime("%H:%M"))
     except Exception as e:
-        print(f"Redis 解鎖失敗: {e}")
+        logger.warning("Redis 解鎖失敗 (appointment_id=%s): %s", appointment_id, e)
 
     full_name = get_full_name(updated_appointment.client)
     time_display = format_appointment_time(updated_appointment.service_dateTime)
     
-    #  判斷付款狀態
     is_paid = (action == "success")
-    try:
-        if is_paid:
-            msg = f"""預約成功！已收到您的款項           
+    if is_paid:
+        msg = f"""預約成功！已收到您的款項           
 我們 {time_display} 線上見😊
 
 🪐幾個注意事項：
@@ -48,18 +46,17 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
 4. 可以錄音或做筆記：閱讀過程中會有許多訊息與指引，建議可以透過錄音或筆記記錄下來，之後也能反覆回顧與整理。
 
 希望這場對話可以讓懿敏感受到靈魂深處的智慧與啟發，還有來自宇宙無條件的愛與支持💫🤍"""
-                # google calendar 建立預約
+        try:
             create_calendar_event(
                 service=calendar_service,
                 client_name=full_name,
                 start_dt=updated_appointment.service_dateTime
             )
-        else:
-            msg = "收款逾期，您的預約已取消。請重新預約。"
-    except Exception as e:
-            print(f"Google Calendar 同步過程發生錯誤: {e}")
+        except Exception as e:
+            logger.error("Google Calendar 同步失敗 (appointment_id=%s): %s", appointment_id, e, exc_info=True)
+    else:
+        msg = "收款逾期，您的預約已取消。請重新預約。"
 
-    # line bot message
     send_line_message(updated_appointment.client.line_user_id, msg)
 
     return updated_appointment

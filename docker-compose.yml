@@ -10,7 +10,6 @@ services:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
     volumes:
       - ./mysql_data:/var/lib/mysql
-      - /etc/localtime:/etc/localtime:ro
     ports:
       - "3307:3306"
     command: --default-time-zone="+08:00"

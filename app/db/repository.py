@@ -1,6 +1,9 @@
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta
-import db.models, db.schemas
+from db import models, schemas
+from core.logging import get_logger
+
+logger = get_logger("repository")
 
 # 查詢所有分類
 def get_categories(db: Session):
@@ -11,11 +14,10 @@ def get_services_by_category_id(db: Session, cat_id: int):
     return db.query(models.Service).filter(models.Service.category_id == cat_id).all()
 
 # 建立預約資料
-def create_appointment(db: Session, data: db.schemas.AppointmentCreate):
+def create_appointment(db: Session, data: schemas.AppointmentCreate):
     try:
-        print("--- 開始建立預約 ---")
-        # 如果沒有資料 -> 建立一筆 Client
-        print(f"正在搜尋 Client: {data.line_user_id}")
+        logger.info("開始建立預約")
+        logger.debug("搜尋 Client: %s", data.line_user_id)
         db_client = db.query(models.Client).filter(models.Client.line_user_id == data.line_user_id).first()
         if not db_client:
             db_client = models.Client(line_user_id=data.line_user_id, last_name=data.last_name, first_name=data.first_name)
@@ -35,7 +37,6 @@ def create_appointment(db: Session, data: db.schemas.AppointmentCreate):
         db.flush() 
 
         for s_name in data.service_items:
-            # 找 service.id
             service = db.query(models.Service).filter(models.Service.service_name == s_name).first()
             if service:
                 db_item = models.AppointmentItem(
@@ -43,18 +44,16 @@ def create_appointment(db: Session, data: db.schemas.AppointmentCreate):
                     service_id=service.id
                 )
                 db.add(db_item)
-            
-            # 測試錯誤
             else:
-                print(f"錯誤：找不到服務名稱 {item.name}")
+                logger.warning("找不到服務名稱: %s", s_name)
 
-        print("--- 預約建立完成，準備 Commit ---")
+        logger.info("預約建立完成，準備 Commit")
         db.commit()
         db.refresh(db_appointment)
         return db_appointment
 
     except Exception as e:
-        print(f"CRUD ERROR: {str(e)}")
+        logger.error("建立預約失敗: %s", e, exc_info=True)
         db.rollback()
         raise e
 
@@ -77,7 +76,7 @@ def update_appointment_status(db: Session, appointment_id: int, action: str):
         return appointment
     except Exception as e:
         db.rollback() 
-        print(f"Database update error: {e}")
+        logger.error("更新預約狀態失敗 (ID: %s): %s", appointment_id, e, exc_info=True)
         return None
 
 

@@ -3,7 +3,9 @@ from datetime import timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from core.config import settings  
+from core.logging import get_logger
+
+logger = get_logger("google_calendar")
 
 def get_calendar_service():
 
@@ -31,7 +33,10 @@ def get_calendar_service():
         pass
 
 def create_calendar_event(service, client_name, start_dt):
-    
+    if not service:
+        logger.warning("略過建立 Google Calendar 事件：未提供 calendar service")
+        return None
+
     # 預設時長為 1 小時
     end_dt = start_dt + timedelta(hours=1)
     
@@ -45,13 +50,12 @@ def create_calendar_event(service, client_name, start_dt):
             'dateTime': end_dt.isoformat(),
             'timeZone': 'Asia/Taipei',
         },
-        'colorId': '5',  # 香蕉黃
+        'colorId': '5',
         'status': 'confirmed',
-        'transparency': 'opaque', # 顯示為忙碌
+        'transparency': 'opaque',
     }
 
     try:
-    
         event_result = service.events().insert(
             calendarId='primary', 
             body=event_body
@@ -60,5 +64,5 @@ def create_calendar_event(service, client_name, start_dt):
         return event_result
     
     except Exception as e:
-        print(f"Google Calendar API 寫入錯誤: {e}")
+        logger.error("Google Calendar API 寫入錯誤: %s", e, exc_info=True)
         return None
