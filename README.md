@@ -102,7 +102,6 @@ VITE_API_URL=https://your-domain.com
 REDIS_HOST=redis
 ```
 
-> **注意**：請勿將 `.env`、`credentials.json`、`token.json` 提交至版本控制。
 
 ### 2. Google Calendar 授權
 
