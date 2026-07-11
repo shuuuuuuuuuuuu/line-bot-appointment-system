@@ -172,18 +172,3 @@ docker compose logs -f web | grep "line_bot.access"
 ```bash
 docker compose logs web | grep "line_user_id=Uxxxx"
 ```
-
-### 常見問題
-
-| 問題 | 排查方式 |
-|------|----------|
-| 下拉選單顯示 no data | 確認 `/categories` API 是否正常（`docker compose logs web`） |
-| 選日期後無時段 | 確認是否為公休日（週五～週日），或 Google Calendar token 是否過期 |
-| Docker 無法啟動 | 確認 Docker Desktop 已啟動且 `docker ps` 正常 |
-| ngrok 警告頁 | 免費版 ngrok 會顯示 Visit Site 攔截頁，正式上線需使用固定網域 |
-
----
-
-## License
-
-Private project.
