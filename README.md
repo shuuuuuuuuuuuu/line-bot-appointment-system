@@ -1,6 +1,6 @@
 # Line Bot 預約系統 (Line Bot Appointment System)
 
-這是一個專為線上或實體服務打造的自動化預約管理系統。後端採用 FastAPI 建立高併發與高效能的 RESTful API，並與 Line Messaging API 深度整合，讓用戶能直接透過 Line Bot 進行服務預約。同時整合了 Google Calendar API 實現日曆同步，自動排程與防呆避免時段重疊，全面優化預約與數據管理流程。
+這是一個為線上或實體服務打造的自動化預約管理系統。後端採用 FastAPI 建立高併發與高效能的 RESTful API，並與 Line Messaging API 深度整合，讓用戶能直接透過 Line Bot 進行服務預約。同時整合了 Google Calendar API 實現日曆同步，自動排程與防呆避免時段重疊，全面優化預約與數據管理流程。
 
 ---
 
@@ -39,21 +39,21 @@ line-bot-appointment-system/
 
 ## 主要核心功能
 
-### 1. 智慧預約與空閒時段計算 (Available Slots Service)
+### 1. 智慧預約與空閒時段計算
 
 - 自動串接後端 MySQL 預約資料與 Google Calendar 實體日曆，即時比對並計算出當前真正可用的預約時段。
-- 導入 Redis 處理高併發排隊與時段鎖定機制，有效避免多位用戶在同一秒內重複搶佔相同預約時段的併發衝突（Race Condition）。
+- 導入 Redis 處理高併發排隊與時段鎖定機制，有效避免多位用戶在同一秒內重複搶佔相同預約時段的併發衝突。
 
 ### 2. 雙向 API 自動化整合
 
-- **Line Messaging API**：用戶能透過 Rich Menu 或 LIFF 預約頁面查詢、預約服務，系統並會自動推送預約成功／付款通知。
+- **Line Messaging API**：用戶能透過 Rich Menu 進行預約服務，系統會自動推送預約成功／付款通知。
 - **Google Calendar API**：當業主核准預約後，後端會自動在對應的 Google 日曆上建立活動排程，保持行程同步。
 - **Email 通知**：新預約建立後，系統會寄送審核信給業主，透過連結確認收款狀態。
 
-### 3. 全方位請求日誌與監控 (API Request Logging Middleware)
+### 3. 請求日誌與監控
 
-- 內建客製化的 API 請求日誌中介軟體，於生產環境中嚴密紀錄每次請求的 Method、Path、Status Code 以及執行時間（Duration）。
-- **隱私安全去識別化**：專為生產環境 Debug 打造，日誌系統會自動將敏感的用戶上下文（Sanitized User Context）進行脫敏與遮罩處理，確保除錯效率與資安防護。
+- 建立 API 請求日誌中介軟體，於生產環境中嚴密紀錄每次請求的 Method、Path、Status Code 以及執行時間。
+- **隱私安全去識別化**：日誌系統會自動將敏感的用戶上下文進行脫敏與遮罩處理，確保除錯效率與資安防護。
 
 ---
 
