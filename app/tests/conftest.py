@@ -35,6 +35,26 @@ def fake_redis(monkeypatch):
     monkeypatch.setattr("services.available_slots.r", fake)
 
 
+@pytest.fixture(autouse=True)
+def fake_google_calendar(monkeypatch):
+    # 測試環境不依賴真實 token.json，提供最小可用的 calendar service stub
+    class _FreeBusy:
+        def query(self, body):
+            return self
+
+        def execute(self):
+            return {"calendars": {"primary": {"busy": []}}}
+
+    class _Service:
+        def freebusy(self):
+            return _FreeBusy()
+
+    def _gen():
+        yield _Service()
+
+    monkeypatch.setattr("services.google_calendar_service.get_calendar_service", _gen)
+
+
 @pytest.fixture()
 def db_session():
     Base.metadata.create_all(bind=_test_engine)

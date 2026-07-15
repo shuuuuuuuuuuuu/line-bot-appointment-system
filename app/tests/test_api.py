@@ -57,3 +57,13 @@ def test_slot_lock_missing_params(client):
 def test_approve_invalid_token(client, seeded_db):
     response = client.get("/approve?token=invalid&action=success")
     assert response.status_code == 403
+
+
+def test_available_slots_returns_503_when_calendar_token_invalid(client, monkeypatch):
+    def _raise():
+        raise Exception("Google Calendar Token 已過期或被撤銷，請重新授權取得 token.json")
+
+    # main.py 以 `from ... import get_calendar_service` 引入，需 patch main 的引用
+    monkeypatch.setattr("main.get_calendar_service", _raise)
+    response = client.get("/available-slots?date=2030-01-07")
+    assert response.status_code == 503

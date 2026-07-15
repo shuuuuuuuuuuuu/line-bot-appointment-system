@@ -10,7 +10,6 @@ logger = get_logger("line_service")
 line_bot_api = LineBotApi(settings.CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(settings.CHANNEL_SECRET)
 
-BOOKING_KEYWORD = "我要預約"
 
 def send_line_message(user_id: str, message: str):
     try:
