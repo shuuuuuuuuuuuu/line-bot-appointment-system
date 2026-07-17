@@ -47,6 +47,10 @@ class Appointment(Base):
     expired = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_message = Column(String(500), nullable=True)
+    payment_deadline_at = Column(DateTime, nullable=True)
+    payment_proof_received = Column(Boolean, default=False)
+    payment_reminder_sent = Column(Boolean, default=False)
+    owner_notified = Column(Boolean, default=False)
     
     client = relationship("Client", back_populates="appointments")
     items = relationship("AppointmentItem", back_populates="appointment")

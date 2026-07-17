@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+import pytz
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
@@ -7,6 +8,10 @@ from googleapiclient.discovery import build
 from core.logging import get_logger
 
 logger = get_logger("google_calendar")
+
+TAIPEI_TZ = pytz.timezone("Asia/Taipei")
+PLACEHOLDER_SUFFIX = "(placeholder)"
+
 
 def get_calendar_service():
 
@@ -39,7 +44,48 @@ def get_calendar_service():
     finally:
         pass
 
-def create_calendar_event(service, client_name, start_dt):
+
+def _event_label(category: str = "") -> str:
+    if category and "頌缽" in category:
+        return "頌缽"
+    return "阿卡西"
+
+
+def _event_summary(client_name: str, category: str = "", *, placeholder: bool = False) -> str:
+    base = f"{_event_label(category)}（{client_name}）"
+    return f"{base}{PLACEHOLDER_SUFFIX}" if placeholder else base
+
+
+def _to_rfc3339(dt):
+    if dt.tzinfo is None:
+        dt = TAIPEI_TZ.localize(dt)
+    return dt.isoformat()
+
+
+def _find_placeholder_event(service, client_name, start_dt, category: str = ""):
+    end_dt = start_dt + timedelta(hours=1)
+    if category:
+        target_summaries = {_event_summary(client_name, category, placeholder=True)}
+    else:
+        target_summaries = {
+            _event_summary(client_name, "阿卡西", placeholder=True),
+            _event_summary(client_name, "頌缽", placeholder=True),
+        }
+
+    events_result = service.events().list(
+        calendarId="primary",
+        timeMin=_to_rfc3339(start_dt),
+        timeMax=_to_rfc3339(end_dt),
+        singleEvents=True,
+    ).execute()
+
+    for event in events_result.get("items", []):
+        if event.get("summary") in target_summaries:
+            return event
+    return None
+
+
+def create_calendar_event(service, client_name, start_dt, category: str = ""):
     if not service:
         # 依需求：Calendar 不可用應視為失敗（不允許跳過）
         raise Exception("Google Calendar service 不可用，無法建立日曆事件")
@@ -48,7 +94,7 @@ def create_calendar_event(service, client_name, start_dt):
     end_dt = start_dt + timedelta(hours=1)
     
     event_body = {
-        'summary': f'阿卡西（{client_name}）',
+        'summary': _event_summary(client_name, category, placeholder=True),
         'start': {
             'dateTime': start_dt.isoformat(),
             'timeZone': 'Asia/Taipei',
@@ -72,4 +118,57 @@ def create_calendar_event(service, client_name, start_dt):
     
     except Exception as e:
         logger.error("Google Calendar API 寫入錯誤: %s", e, exc_info=True)
+        return None
+
+
+def confirm_calendar_event(service, client_name, start_dt, category: str = ""):
+    """核准時移除 summary 的 (placeholder)，不重複建立事件。"""
+    if not service:
+        raise Exception("Google Calendar service 不可用，無法更新日曆事件")
+
+    try:
+        event = _find_placeholder_event(service, client_name, start_dt, category)
+        if not event:
+            logger.warning(
+                "找不到 placeholder 日曆事件 (client=%s, start=%s, category=%s)",
+                client_name,
+                start_dt,
+                category,
+            )
+            return None
+
+        event["summary"] = _event_summary(client_name, category, placeholder=False)
+        return service.events().update(
+            calendarId="primary",
+            eventId=event["id"],
+            body=event,
+        ).execute()
+    except Exception as e:
+        logger.error("Google Calendar API 更新錯誤: %s", e, exc_info=True)
+        return None
+
+
+def delete_placeholder_calendar_event(service, client_name, start_dt, category: str = ""):
+    """取消預約時刪除 placeholder 日曆事件。"""
+    if not service:
+        raise Exception("Google Calendar service 不可用，無法刪除日曆事件")
+
+    try:
+        event = _find_placeholder_event(service, client_name, start_dt, category)
+        if not event:
+            logger.warning(
+                "找不到可刪除的 placeholder 日曆事件 (client=%s, start=%s, category=%s)",
+                client_name,
+                start_dt,
+                category,
+            )
+            return None
+
+        service.events().delete(
+            calendarId="primary",
+            eventId=event["id"],
+        ).execute()
+        return event
+    except Exception as e:
+        logger.error("Google Calendar API 刪除錯誤: %s", e, exc_info=True)
         return None

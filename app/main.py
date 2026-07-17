@@ -14,13 +14,16 @@ import db.schemas
 from db import repository
 from db.models import Base
 from core.database import engine, get_db
-from services.google_calendar_service import get_calendar_service
+from services.google_calendar_service import get_calendar_service, create_calendar_event
 from services.available_slots import get_available_slots_logic, get_busy_slots, get_pending_slots, delete_pending_slot, try_lock_slot
-from services.mail_tasks import send_owner_notification
 from services.line_service import handler, line_bot_api, send_line_message, send_payment_instruction
 from linebot.exceptions import InvalidSignatureError
 from core.security import verify_token
 from services.appointment_service import process_appointment_approval
+from services.payment_followup_service import (
+    resume_payment_followups,
+    start_payment_followup,
+)
 from common.utils import get_full_name
 
 setup_logging()
@@ -30,6 +33,11 @@ logger = get_logger("main")
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def on_startup():
+    resume_payment_followups()
 
 origins = [
     "http://localhost:5173",
@@ -113,7 +121,16 @@ def create_appointment(
         )
 
         full_name = get_full_name(data)
-        background_tasks.add_task(send_owner_notification, appointment.id, full_name)
+        service_gen = get_calendar_service()
+        calendar_service = next(service_gen)
+        background_tasks.add_task(
+            create_calendar_event,
+            calendar_service,
+            full_name,
+            data.service_dateTime,
+            data.category,
+        )
+        background_tasks.add_task(start_payment_followup, appointment.id)
         
         return appointment
     
@@ -175,7 +192,7 @@ async def callback(request: Request):
     signature = request.headers['X-Line-Signature']
     body = await request.body()
     body_str = body.decode('utf-8')
-    
+    logger.info("LINE webhook received: %s", body_str)
     try:
         handler.handle(body_str, signature)
     except InvalidSignatureError:

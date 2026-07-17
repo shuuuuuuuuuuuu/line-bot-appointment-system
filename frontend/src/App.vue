@@ -280,7 +280,7 @@ const submitForm = async () => {
     category: currentCategory ? currentCategory.category_name : "",
     service_items: form.services,
     user_message: form.user_message,
-    total_price: 2222,
+    total_price: currentCategory?.category_name?.includes("頌缽") ? 3333 : 2222,
     total_duration: 60,
     service_dateTime: `${form.date}T${form.time}:00`,
   };

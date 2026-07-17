@@ -3,7 +3,10 @@ from fastapi import HTTPException
 from db import repository
 from services.available_slots import delete_pending_slot
 from services.line_service import send_line_message
-from services.google_calendar_service import create_calendar_event
+from services.google_calendar_service import (
+    confirm_calendar_event,
+    delete_placeholder_calendar_event,
+)
 from common.utils import format_appointment_time, get_full_name
 from core.logging import get_logger
 
@@ -29,6 +32,7 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
 
     full_name = get_full_name(updated_appointment.client)
     time_display = format_appointment_time(updated_appointment.service_dateTime)
+    category_name = repository.get_appointment_category_name(updated_appointment)
     
     is_paid = (action == "success")
     if is_paid:
@@ -47,15 +51,30 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
 
 希望這場對話可以讓懿敏感受到靈魂深處的智慧與啟發，還有來自宇宙無條件的愛與支持💫🤍"""
         try:
-            create_calendar_event(
+            confirm_calendar_event(
                 service=calendar_service,
                 client_name=full_name,
-                start_dt=updated_appointment.service_dateTime
+                start_dt=updated_appointment.service_dateTime,
+                category=category_name,
             )
         except Exception as e:
             logger.error("Google Calendar 同步失敗 (appointment_id=%s): %s", appointment_id, e, exc_info=True)
     else:
         msg = "收款逾期，您的預約已取消。請重新預約。"
+        try:
+            delete_placeholder_calendar_event(
+                service=calendar_service,
+                client_name=full_name,
+                start_dt=updated_appointment.service_dateTime,
+                category=category_name,
+            )
+        except Exception as e:
+            logger.error(
+                "Google Calendar 刪除 placeholder 失敗 (appointment_id=%s): %s",
+                appointment_id,
+                e,
+                exc_info=True,
+            )
 
     send_line_message(updated_appointment.client.line_user_id, msg)
 
