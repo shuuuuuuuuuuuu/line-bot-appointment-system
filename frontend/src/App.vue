@@ -47,7 +47,7 @@
 
         <!-- 服務時長描述 (淺灰色字體) -->
         <div class="description-text" v-if="servicesList.length > 0">
-          服務時長約 60 分鐘
+          服務時長約 {{ serviceDuration }} 分鐘
         </div>
 
         <!-- 服務項目（根據類別動態顯示）（多選） -->
@@ -130,7 +130,7 @@
 import { ref, reactive, computed, onMounted } from "vue";
 import liff from "@line/liff";
 import axios from "axios";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -172,6 +172,24 @@ const fetchCategories = async () => {
 const handleCategoryChange = async (catId) => {
   form.services = []; // 清空已選服務
   servicesList.value = [];
+
+  const currentCategory = categories.value.find((c) => c.id === catId);
+  if (currentCategory?.category_name?.includes("頌缽")) {
+    ElMessageBox.alert(
+      `<strong>不適合做頌缽療癒的對象：</strong><br>
+🚨 懷孕<br>
+🚨 裝有心律調節器<br>
+🚨 對聲音或震動特別敏感<br>
+🚨 目前有嚴重身心疾病`,
+      "注意事項",
+      {
+        confirmButtonText: "我知道了",
+        dangerouslyUseHTMLString: true,
+        customClass: "singing-bowl-warning",
+      }
+    );
+  }
+
   try {
     const response = await api.get(`/services/filter?category_id=${catId}`);
     servicesList.value = response.data;
@@ -265,13 +283,29 @@ const canSubmit = computed(() => {
   );
 });
 
+const selectedCategory = computed(() =>
+  categories.value.find((c) => c.id === selectedCategoryId.value)
+);
+
+const serviceDuration = computed(() => {
+  const name = selectedCategory.value?.category_name || "";
+  if (name.includes("頌缽")) return 70;
+  if (name.includes("靈氣")) return 90;
+  return 60;
+});
+
+const servicePrice = computed(() => {
+  const name = selectedCategory.value?.category_name || "";
+  if (name.includes("頌缽")) return 3333;
+  if (name.includes("靈氣")) return 1555;
+  return 2222;
+});
+
 const submitForm = async () => {
   submitting.value = true;
 
   // 取得目前選中的類別名稱
-  const currentCategory = categories.value.find(
-    (c) => c.id === selectedCategoryId.value
-  );
+  const currentCategory = selectedCategory.value;
 
   const payload = {
     line_user_id: lineUserId.value,
@@ -280,8 +314,8 @@ const submitForm = async () => {
     category: currentCategory ? currentCategory.category_name : "",
     service_items: form.services,
     user_message: form.user_message,
-    total_price: currentCategory?.category_name?.includes("頌缽") ? 3333 : 2222,
-    total_duration: 60,
+    total_price: servicePrice.value,
+    total_duration: serviceDuration.value,
     service_dateTime: `${form.date}T${form.time}:00`,
   };
 
@@ -376,5 +410,10 @@ const submitForm = async () => {
   margin-top: -10px;
   margin-bottom: 10px;
   text-align: left;
+}
+
+:global(.singing-bowl-warning .el-message-box__title) {
+  color: #f56c6c;
+  font-weight: 700;
 }
 </style>

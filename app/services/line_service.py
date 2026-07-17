@@ -163,7 +163,13 @@ def send_payment_instruction(data: db.schemas.AppointmentCreate):
 
     fee = data.total_price
     if not fee:
-        fee = 3333 if "頌缽" in (data.category or "") else 2222
+        category = data.category or ""
+        if "頌缽" in category:
+            fee = 3333
+        elif "靈氣" in category:
+            fee = 1555
+        else:
+            fee = 2222
 
     message = (
         f"嗨～ {data.first_name}，您的預約資料已送出\n"

@@ -17,7 +17,11 @@ def test_off_day_returns_empty():
 
 
 def test_confirmed_slot_is_excluded():
-    slots = get_available_slots_logic([], ["10:00"], [], [], MONDAY)
+    confirmed = [{
+        "start": "2030-01-07T10:00:00+08:00",
+        "end": "2030-01-07T11:00:00+08:00",
+    }]
+    slots = get_available_slots_logic([], confirmed, [], [], MONDAY)
     assert "10:00" not in slots
     assert "09:00" in slots
 
@@ -31,3 +35,29 @@ def test_busy_calendar_slot_is_excluded():
     busy = [{"start": "2030-01-07T11:00:00+08:00", "end": "2030-01-07T12:00:00+08:00"}]
     slots = get_available_slots_logic(busy, [], [], [], MONDAY)
     assert "11:00" not in slots
+
+
+def test_reiki_90min_plus_buffer_blocks_following_hours():
+    # 13:00 靈氣 90 分 + buffer 60 分 => 佔用到 15:30，14:00、15:00 不可約
+    confirmed = [{
+        "start": "2030-01-07T13:00:00+08:00",
+        "end": "2030-01-07T14:30:00+08:00",
+    }]
+    slots = get_available_slots_logic([], confirmed, [], [], MONDAY)
+    assert "13:00" not in slots
+    assert "14:00" not in slots
+    assert "15:00" not in slots
+    assert "16:00" in slots
+
+
+def test_singing_bowl_70min_plus_buffer_blocks_following_hours():
+    # 13:00 頌缽 70 分 + buffer 60 分 => 佔用到 15:10，14:00、15:00 不可約，16:00 可約
+    confirmed = [{
+        "start": "2030-01-07T13:00:00+08:00",
+        "end": "2030-01-07T14:10:00+08:00",
+    }]
+    slots = get_available_slots_logic([], confirmed, [], [], MONDAY)
+    assert "13:00" not in slots
+    assert "14:00" not in slots
+    assert "15:00" not in slots
+    assert "16:00" in slots

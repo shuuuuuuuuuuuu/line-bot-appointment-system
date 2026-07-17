@@ -36,7 +36,25 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
     
     is_paid = (action == "success")
     if is_paid:
-        msg = f"""預約成功！已收到您的款項           
+        if "頌缽" in category_name:
+            first_name = updated_appointment.client.first_name
+            msg = f"""收到款項了～我們 {time_display} 見😊
+
+地點在露西森林七樓（台北車站 M2 出口）。
+
+🪐幾個注意事項：
+
+1. 當天不需要提早抵達，準時到就好～
+
+2. 閱讀前 24 小時盡量不要飲酒、使用安眠藥或娛樂性藥物，才能達到最佳療癒效果。
+
+3. 準備好水壺，療癒前後都需要補充很多水。
+
+4. 帶著放鬆與信任的心前來：當天的目的就是讓自己好好放鬆享受波音的療癒與音頻震動的按摩，所以只需要帶著一顆放鬆與信任的心前來就好呦。
+
+希望這場頌缽療癒可以讓{first_name}好好放鬆，獲得身心靈的洗滌與療癒。😇✨"""
+        else:
+            msg = f"""預約成功！已收到您的款項           
 我們 {time_display} 線上見😊
 
 🪐幾個注意事項：

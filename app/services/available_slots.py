@@ -58,6 +58,20 @@ def get_busy_slots(service, date_str):
     
     return busy_slots 
 
+
+def _format_busy_ranges(busy_slots, buffer_minutes):
+    formatted_busy = []
+    for busy in busy_slots:
+        b_start = datetime.fromisoformat(
+            busy['start'].replace('Z', '+00:00')
+        ).astimezone(TAIPEI_TZ).replace(tzinfo=None)
+        b_end = datetime.fromisoformat(
+            busy['end'].replace('Z', '+00:00')
+        ).astimezone(TAIPEI_TZ).replace(tzinfo=None) + timedelta(minutes=buffer_minutes)
+        formatted_busy.append({'start': b_start, 'end': b_end})
+    return formatted_busy
+
+
 # 提取可提供服務時段
 def get_available_slots_logic(busy_slots, confirmed_slots, pending_slots, db_pending_slots, target_date_str):
     
@@ -77,15 +91,11 @@ def get_available_slots_logic(busy_slots, confirmed_slots, pending_slots, db_pen
     current_time = datetime.strptime(f"{target_date_str} {OPEN_HOUR:02d}:00", "%Y-%m-%d %H:%M")
     end_of_day = datetime.strptime(f"{target_date_str} {CLOSE_HOUR:02d}:00", "%Y-%m-%d %H:%M")
 
-    # busy_slots time format
-    formatted_busy = []
-    for busy in busy_slots:
-        # Google 回傳的是 ISO 格式，例如 2026-05-16T12:00:00Z
-        b_start = datetime.fromisoformat(busy['start'].replace('Z', '+00:00')).astimezone(TAIPEI_TZ).replace(tzinfo=None)
-        # 還有加 buffer time
-        b_end = datetime.fromisoformat(busy['end'].replace('Z', '+00:00')).astimezone(TAIPEI_TZ).replace(tzinfo=None)+ timedelta(minutes=BUFFER)
-
-        formatted_busy.append({'start': b_start, 'end': b_end})
+    # Google Calendar + DB 已確認 / 待付款預約，皆依服務結束時間再加 buffer
+    formatted_busy = _format_busy_ranges(
+        list(busy_slots or []) + list(confirmed_slots or []) + list(db_pending_slots or []),
+        BUFFER,
+    )
 
     # 逐一檢查時段是否衝突
     while current_time + timedelta(minutes=DURATION_MINUTES) <= end_of_day:
@@ -93,12 +103,10 @@ def get_available_slots_logic(busy_slots, confirmed_slots, pending_slots, db_pen
         slot_start_str = slot_start.strftime("%H:%M")
         slot_end = current_time + timedelta(minutes=DURATION_MINUTES)
         
-        # 檢查衝突 google calendar, redis, db
+        # 檢查衝突 google calendar / db 忙碌區間、redis 暫時鎖定
         is_conflict = (
             any(slot_start < b['end'] and slot_end > b['start'] for b in formatted_busy) or
-            (slot_start_str in pending_slots) or
-            (slot_start_str in confirmed_slots) or
-            (slot_start_str in db_pending_slots)
+            (slot_start_str in pending_slots)
         )
 
         if not is_conflict:

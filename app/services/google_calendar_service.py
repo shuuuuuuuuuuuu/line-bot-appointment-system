@@ -48,6 +48,8 @@ def get_calendar_service():
 def _event_label(category: str = "") -> str:
     if category and "頌缽" in category:
         return "頌缽"
+    if category and "靈氣" in category:
+        return "靈氣"
     return "阿卡西"
 
 
@@ -63,13 +65,15 @@ def _to_rfc3339(dt):
 
 
 def _find_placeholder_event(service, client_name, start_dt, category: str = ""):
-    end_dt = start_dt + timedelta(hours=1)
+    # 預留較長搜尋窗，涵蓋靈氣等 90 分鐘服務
+    end_dt = start_dt + timedelta(hours=3)
     if category:
         target_summaries = {_event_summary(client_name, category, placeholder=True)}
     else:
         target_summaries = {
             _event_summary(client_name, "阿卡西", placeholder=True),
             _event_summary(client_name, "頌缽", placeholder=True),
+            _event_summary(client_name, "靈氣", placeholder=True),
         }
 
     events_result = service.events().list(
@@ -85,13 +89,19 @@ def _find_placeholder_event(service, client_name, start_dt, category: str = ""):
     return None
 
 
-def create_calendar_event(service, client_name, start_dt, category: str = ""):
+def create_calendar_event(
+    service,
+    client_name,
+    start_dt,
+    category: str = "",
+    duration_minutes: int = 60,
+):
     if not service:
         # 依需求：Calendar 不可用應視為失敗（不允許跳過）
         raise Exception("Google Calendar service 不可用，無法建立日曆事件")
 
-    # 預設時長為 1 小時
-    end_dt = start_dt + timedelta(hours=1)
+    duration = duration_minutes if duration_minutes and duration_minutes > 0 else 60
+    end_dt = start_dt + timedelta(minutes=duration)
     
     event_body = {
         'summary': _event_summary(client_name, category, placeholder=True),

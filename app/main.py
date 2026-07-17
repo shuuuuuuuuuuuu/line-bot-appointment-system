@@ -129,6 +129,7 @@ def create_appointment(
             full_name,
             data.service_dateTime,
             data.category,
+            data.total_duration,
         )
         background_tasks.add_task(start_payment_followup, appointment.id)
         

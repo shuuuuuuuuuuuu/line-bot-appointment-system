@@ -162,7 +162,7 @@ def get_appointments_needing_payment_followup(db: Session):
     )
 
 
-# 查詢付款狀態
+# 查詢已確認預約的忙碌區間（含服務時長；buffer 由 available_slots 統一加）
 def get_confirmed_slots(db: Session, date_str: str):
     
     start_dt = datetime.strptime(f"{date_str} 00:00:00", "%Y-%m-%d %H:%M:%S")
@@ -174,19 +174,33 @@ def get_confirmed_slots(db: Session, date_str: str):
         models.Appointment.paid == True 
     ).all()
 
-    return [app.service_dateTime.strftime("%H:%M") for app in appointments]
+    return [_appointment_to_busy_range(app) for app in appointments]
 
-# 新增：獲取資料庫中「尚未過期且尚未付款」的時段
+
+# 新增：獲取資料庫中「尚未過期且尚未付款」的忙碌區間
 def get_db_pending_slots(db: Session, date_str: str):
     now = datetime.now()
+    day_start = datetime.strptime(date_str, "%Y-%m-%d")
+    day_end = datetime.strptime(f"{date_str} 23:59:59", "%Y-%m-%d %H:%M:%S")
     
     # 找出匯款期限尚未到期、未付款、未標記過期的預約
     pending = db.query(models.Appointment).filter(
-        models.Appointment.service_dateTime >= datetime.strptime(date_str, "%Y-%m-%d"),
+        models.Appointment.service_dateTime >= day_start,
+        models.Appointment.service_dateTime <= day_end,
         models.Appointment.paid == False,
         models.Appointment.expired == False,
         models.Appointment.payment_deadline_at.isnot(None),
         models.Appointment.payment_deadline_at >= now,
     ).all()
     
-    return [app.service_dateTime.strftime("%H:%M") for app in pending]
+    return [_appointment_to_busy_range(app) for app in pending]
+
+
+def _appointment_to_busy_range(appointment) -> dict:
+    start = appointment.service_dateTime
+    duration = appointment.total_duration or 60
+    end = start + timedelta(minutes=duration)
+    return {
+        "start": f"{start.isoformat()}+08:00",
+        "end": f"{end.isoformat()}+08:00",
+    }
