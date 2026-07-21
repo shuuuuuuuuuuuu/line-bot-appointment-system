@@ -56,6 +56,41 @@ def test_approval_success_without_calendar(
 
 
 @patch("services.appointment_service.send_line_message")
+@patch("services.appointment_service.confirm_calendar_event")
+@patch("services.appointment_service.delete_placeholder_calendar_event")
+@patch("services.appointment_service.delete_pending_slot")
+def test_repeated_approval_does_not_send_line_again(
+    mock_delete_slot,
+    mock_delete_event,
+    mock_confirm_event,
+    mock_send_line,
+    db_session,
+):
+    appointment = _make_appointment(db_session)
+
+    first_result = process_appointment_approval(
+        db_session,
+        appointment.id,
+        "success",
+        calendar_service=None,
+    )
+    repeated_result = process_appointment_approval(
+        db_session,
+        appointment.id,
+        "reject",
+        calendar_service=None,
+    )
+
+    assert first_result.paid is True
+    assert repeated_result.paid is True
+    assert repeated_result.expired is False
+    mock_send_line.assert_called_once()
+    mock_confirm_event.assert_called_once()
+    mock_delete_event.assert_not_called()
+    mock_delete_slot.assert_called_once()
+
+
+@patch("services.appointment_service.send_line_message")
 @patch("services.appointment_service.delete_placeholder_calendar_event")
 @patch("services.appointment_service.delete_pending_slot")
 def test_approval_reject_deletes_placeholder(

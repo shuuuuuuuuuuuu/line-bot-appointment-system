@@ -3,7 +3,7 @@ from services.mail import fm
 from sqlalchemy.orm import Session
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from core.config import settings
 from core.logging import setup_logging, get_logger
 from core.request_logging import RequestLoggingMiddleware
@@ -14,7 +14,7 @@ import db.schemas
 from db import repository
 from db.models import Base
 from core.database import engine, get_db
-from services.google_calendar_service import get_calendar_service, create_calendar_event
+from services.google_calendar_service import get_calendar_service, create_and_store_calendar_event
 from services.available_slots import get_available_slots_logic, get_busy_slots, get_pending_slots, delete_pending_slot, try_lock_slot
 from services.line_service import handler, line_bot_api, send_line_message, send_payment_instruction
 from linebot.exceptions import InvalidSignatureError
@@ -124,7 +124,8 @@ def create_appointment(
         service_gen = get_calendar_service()
         calendar_service = next(service_gen)
         background_tasks.add_task(
-            create_calendar_event,
+            create_and_store_calendar_event,
+            appointment.id,
             calendar_service,
             full_name,
             data.service_dateTime,
@@ -168,6 +169,9 @@ def handle_approval(
     action: str, 
     db: Session = Depends(core.database.get_db),
 ):
+    if action not in {"success", "reject"}:
+        raise HTTPException(status_code=422, detail="無效的審核動作")
+
     payload = verify_token(token)
     if not payload:
         raise HTTPException(status_code=403, detail="無效或過期的連結")
@@ -184,8 +188,23 @@ def handle_approval(
         logger.warning("核准流程略過 Google Calendar (%s)", e)
 
     process_appointment_approval(db, appointment_id, action, calendar_service)
-    
-    return {"message": "Success"}
+
+    return HTMLResponse(
+        content="""
+        <!doctype html>
+        <html lang="zh-Hant">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>預約審核完成</title>
+          </head>
+          <body style="font-family: sans-serif; text-align: center; padding: 40px;">
+            <h2>此預約已完成審核</h2>
+          </body>
+        </html>
+        """,
+        status_code=200,
+    )
 
 
 @app.post("/callback")

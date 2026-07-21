@@ -64,28 +64,35 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
 
 # 更新付款狀態
 def update_appointment_status(db: Session, appointment_id: int, action: str):
-    appointment = get_appointment(db, appointment_id)
-    if not appointment:
-        return None
-    
-    if action == "success":
-        appointment.paid = True
-        appointment.expired = False
-    elif action == "reject":
-        appointment.paid = False
-        appointment.expired = True
+    """原子化處理審核；回傳 (appointment, 是否為首次處理)。"""
+    if action not in {"success", "reject"}:
+        return None, False
+
+    values = {
+        models.Appointment.paid: action == "success",
+        models.Appointment.expired: action == "reject",
+    }
 
     try:
+        updated_count = (
+            db.query(models.Appointment)
+            .filter(
+                models.Appointment.id == appointment_id,
+                models.Appointment.paid == False,
+                models.Appointment.expired == False,
+                models.Appointment.deleted_at.is_(None),
+            )
+            .update(values, synchronize_session=False)
+        )
         db.commit()
-        db.refresh(appointment)
-        return appointment
+        return get_appointment(db, appointment_id), updated_count == 1
     except Exception as e:
-        db.rollback() 
+        db.rollback()
         logger.error("更新預約狀態失敗 (ID: %s): %s", appointment_id, e, exc_info=True)
-        return None
+        return None, False
 
 
-# 查詢特定id預約
+# 查詢特定id預約（排除刪除）
 def get_appointment(db: Session, appointment_id: int):
     return (
         db.query(models.Appointment)
@@ -95,7 +102,10 @@ def get_appointment(db: Session, appointment_id: int):
             .joinedload(models.AppointmentItem.service)
             .joinedload(models.Service.category),
         )
-        .filter(models.Appointment.id == appointment_id)
+        .filter(
+            models.Appointment.id == appointment_id,
+            models.Appointment.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -120,6 +130,7 @@ def get_latest_pending_appointment_by_line_user_id(db: Session, line_user_id: st
             models.Client.line_user_id == line_user_id,
             models.Appointment.paid == False,
             models.Appointment.expired == False,
+            models.Appointment.deleted_at.is_(None),
             (
                 (models.Appointment.payment_deadline_at.is_(None))
                 | (models.Appointment.payment_deadline_at >= now)
@@ -146,16 +157,66 @@ def mark_payment_proof_received(db: Session, appointment_id: int):
         return None
 
 
+def soft_delete_appointment(db: Session, appointment_id: int) -> bool:
+    """刪除預約：標記 deleted_at，並設為逾期。"""
+    appointment = (
+        db.query(models.Appointment)
+        .filter(
+            models.Appointment.id == appointment_id,
+            models.Appointment.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not appointment:
+        return False
+    try:
+        appointment.deleted_at = datetime.now()
+        appointment.expired = True
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error("刪除預約失敗 (ID: %s): %s", appointment_id, e, exc_info=True)
+        return False
+
+
+def set_google_event_id(db: Session, appointment_id: int, event_id: str):
+    appointment = (
+        db.query(models.Appointment)
+        .filter(
+            models.Appointment.id == appointment_id,
+            models.Appointment.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not appointment:
+        return None
+    try:
+        appointment.google_event_id = event_id
+        db.commit()
+        db.refresh(appointment)
+        return appointment
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            "寫入 google_event_id 失敗 (ID: %s): %s",
+            appointment_id,
+            e,
+            exc_info=True,
+        )
+        return None
+
+
 def get_appointments_needing_payment_followup(db: Session):
-    """尚未收到匯款資訊、尚未寄出最終業主通知的待付款預約。"""
+    """尚未收到匯款資訊、尚未結束匯款追蹤的待付款預約。"""
     return (
         db.query(models.Appointment)
         .options(joinedload(models.Appointment.client))
         .filter(
             models.Appointment.paid == False,
             models.Appointment.expired == False,
+            models.Appointment.deleted_at.is_(None),
             models.Appointment.payment_proof_received == False,
-            models.Appointment.owner_notified == False,
             models.Appointment.payment_deadline_at.isnot(None),
         )
         .all()
@@ -171,7 +232,8 @@ def get_confirmed_slots(db: Session, date_str: str):
     appointments = db.query(models.Appointment).filter(
         models.Appointment.service_dateTime >= start_dt,
         models.Appointment.service_dateTime <= end_dt,
-        models.Appointment.paid == True 
+        models.Appointment.paid == True,
+        models.Appointment.deleted_at.is_(None),
     ).all()
 
     return [_appointment_to_busy_range(app) for app in appointments]
@@ -189,6 +251,7 @@ def get_db_pending_slots(db: Session, date_str: str):
         models.Appointment.service_dateTime <= day_end,
         models.Appointment.paid == False,
         models.Appointment.expired == False,
+        models.Appointment.deleted_at.is_(None),
         models.Appointment.payment_deadline_at.isnot(None),
         models.Appointment.payment_deadline_at >= now,
     ).all()

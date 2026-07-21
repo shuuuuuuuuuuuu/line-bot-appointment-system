@@ -6,13 +6,18 @@ from core.database import SessionLocal
 from core.logging import get_logger
 from common.utils import get_full_name
 from db import repository
+from services.available_slots import delete_pending_slot
+from services.google_calendar_service import (
+    delete_placeholder_calendar_event,
+    get_calendar_service,
+)
 from services.line_service import send_line_message
-from services.mail_tasks import send_owner_notification
 
 logger = get_logger("payment_followup")
 
 PAYMENT_WINDOW = timedelta(hours=1)
 PAYMENT_REMINDER_MESSAGE = "匯款後請務必提供匯款資訊，才算預約成功呦！"
+PAYMENT_EXPIRED_MESSAGE = "收款逾期，您的預約已取消。請重新預約。"
 
 _scheduled_appointment_ids: Set[int] = set()
 
@@ -35,14 +40,70 @@ def _is_followup_done(appointment) -> bool:
         or appointment.paid
         or appointment.expired
         or appointment.payment_proof_received
-        or appointment.owner_notified
+        or getattr(appointment, "deleted_at", None) is not None
     )
+
+
+def _cancel_expired_appointment(db, appointment) -> None:
+    """第二次逾時：通知案主、刪除日曆事件與訂單，不寄業主信。"""
+    appointment_id = appointment.id
+    line_user_id = appointment.client.line_user_id
+    full_name = get_full_name(appointment.client)
+    category_name = repository.get_appointment_category_name(appointment)
+    start_dt = appointment.service_dateTime
+
+    try:
+        send_line_message(line_user_id, PAYMENT_EXPIRED_MESSAGE)
+    except Exception as e:
+        logger.error(
+            "逾期取消推播失敗 (appointment_id=%s): %s",
+            appointment_id,
+            e,
+            exc_info=True,
+        )
+
+    try:
+        service_dt = start_dt
+        delete_pending_slot(
+            service_dt.strftime("%Y-%m-%d"),
+            service_dt.strftime("%H:%M"),
+        )
+    except Exception as e:
+        logger.warning(
+            "Redis 解鎖失敗 (appointment_id=%s): %s",
+            appointment_id,
+            e,
+        )
+
+    try:
+        service_gen = get_calendar_service()
+        calendar_service = next(service_gen)
+        delete_placeholder_calendar_event(
+            service=calendar_service,
+            client_name=full_name,
+            start_dt=start_dt,
+            category=category_name,
+            event_id=getattr(appointment, "google_event_id", None),
+        )
+    except Exception as e:
+        logger.error(
+            "刪除 Google Calendar 事件失敗 (appointment_id=%s): %s",
+            appointment_id,
+            e,
+            exc_info=True,
+        )
+
+    if not repository.soft_delete_appointment(db, appointment_id):
+        logger.error("刪除逾期預約失敗 (appointment_id=%s)", appointment_id)
+        return
+
+    logger.info("已取消並刪除逾期預約 (appointment_id=%s)", appointment_id)
 
 
 async def payment_followup_loop(appointment_id: int):
     """
     1) 到期仍未收到後五碼／截圖 → LINE 提醒案主，並延長匯款期限 1 小時
-    2) 延長後再到期仍未提供 → 寄送 send_owner_notification 供業主最終確認
+    2) 延長後再到期仍未提供 → LINE 通知取消、刪除日曆事件與訂單（不寄業主信）
     """
     while True:
         db = SessionLocal()
@@ -87,24 +148,7 @@ async def payment_followup_loop(appointment_id: int):
                 )
                 continue
 
-            full_name = get_full_name(appointment.client)
-            appointment.owner_notified = True
-            db.commit()
-
-            try:
-                await send_owner_notification(
-                    appointment_id,
-                    full_name,
-                    last_five_digits="未提供",
-                )
-            except Exception as e:
-                logger.error(
-                    "最終業主通知失敗 (appointment_id=%s): %s",
-                    appointment_id,
-                    e,
-                    exc_info=True,
-                )
-            logger.info("已寄出最終業主確認信 (appointment_id=%s)", appointment_id)
+            _cancel_expired_appointment(db, appointment)
             return
         except Exception as e:
             logger.error(

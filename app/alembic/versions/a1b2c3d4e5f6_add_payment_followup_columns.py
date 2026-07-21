@@ -1,4 +1,10 @@
-# add payment followup columns
+"""add payment followup columns
+
+Revision ID: a1b2c3d4e5f6
+Revises: 38ce518b7cbe
+Create Date: 2026-07-17 13:40:00.000000
+
+"""
 
 from typing import Sequence, Union
 

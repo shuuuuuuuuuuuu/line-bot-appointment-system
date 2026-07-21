@@ -51,6 +51,8 @@ class Appointment(Base):
     payment_proof_received = Column(Boolean, default=False)
     payment_reminder_sent = Column(Boolean, default=False)
     owner_notified = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
+    google_event_id = Column(String(255), nullable=True)
     
     client = relationship("Client", back_populates="appointments")
     items = relationship("AppointmentItem", back_populates="appointment")

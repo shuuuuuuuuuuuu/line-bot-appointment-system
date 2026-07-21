@@ -20,9 +20,20 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
     if not hasattr(appointment, 'client') or not appointment.client:
         raise HTTPException(status_code=400, detail="此預約缺乏關聯的客戶資料")
 
-    updated_appointment = repository.update_appointment_status(db, appointment_id, action)
+    updated_appointment, is_first_action = repository.update_appointment_status(
+        db,
+        appointment_id,
+        action,
+    )
     if not updated_appointment:
         raise HTTPException(status_code=500, detail="資料庫更新失敗")
+    if not is_first_action:
+        logger.info(
+            "預約審核已處理，略過重複操作 (appointment_id=%s, action=%s)",
+            appointment_id,
+            action,
+        )
+        return updated_appointment
 
     try:
         service_dt = updated_appointment.service_dateTime
@@ -53,6 +64,27 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
 4. 帶著放鬆與信任的心前來：當天的目的就是讓自己好好放鬆享受波音的療癒與音頻震動的按摩，所以只需要帶著一顆放鬆與信任的心前來就好呦。
 
 希望這場頌缽療癒可以讓{first_name}好好放鬆，獲得身心靈的洗滌與療癒。😇✨"""
+        elif "靈氣" in category_name:
+            msg = f"""收到款項了～我們 {time_display} 遠端見😊
+
+療癒前的準備：
+
+💛 舒適衣著，建議換上寬鬆、無束縛的居家服，讓身體能完全放鬆。
+💛 可以提早 5-10 分鐘，將手機調至靜音或飛航模式，給自己一段完全不受打擾的時光。
+💛 平常心，不需要刻意努力去感覺，只需要帶著一顆開放的心、把自己當作一顆準備充電的電池就好。
+💛 水分補充，靈氣療癒前後都可以喝一點溫開水，幫助能量流動與代謝。
+
+【溫馨提醒】靈氣屬於輔助性方式，非醫療行為，不涉及診斷與療效。若有身體不適或病理症狀，請務必以正規醫療與醫師的醫囑為主。
+
+流程說明
+
+💛 療癒前：靈療師會撥打 Line Audio 說明流程與介紹靈氣
+
+💛 療癒中：結束通話，開始療癒。請被療癒者採舒服靜坐姿勢或躺著放鬆也可以，過程約 60 分鐘。
+
+💛 療癒後：靈療會再次撥打 Line Audio，屆時彼此分享療癒結果與感受。
+
+線上見😊"""
         else:
             msg = f"""預約成功！已收到您的款項           
 我們 {time_display} 線上見😊
@@ -74,17 +106,19 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
                 client_name=full_name,
                 start_dt=updated_appointment.service_dateTime,
                 category=category_name,
+                event_id=getattr(updated_appointment, "google_event_id", None),
             )
         except Exception as e:
             logger.error("Google Calendar 同步失敗 (appointment_id=%s): %s", appointment_id, e, exc_info=True)
     else:
-        msg = "收款逾期，您的預約已取消。請重新預約。"
+        msg = "您的預約已取消。請重新預約。"
         try:
             delete_placeholder_calendar_event(
                 service=calendar_service,
                 client_name=full_name,
                 start_dt=updated_appointment.service_dateTime,
                 category=category_name,
+                event_id=getattr(updated_appointment, "google_event_id", None),
             )
         except Exception as e:
             logger.error(
