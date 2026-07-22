@@ -65,6 +65,21 @@ services:
     depends_on:
       - web
 
+  # Vue management application
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./admin-frontend:/app
+      - /app/node_modules
+    ports:
+      - "5174:5174"
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
+    depends_on:
+      - web
+
   # redis
   redis:
     image: "redis:alpine"

@@ -1,12 +1,12 @@
 from io import BytesIO
 from typing import Optional
 
+from services.mail import fm
 from fastapi_mail import MessageSchema
 from starlette.datastructures import Headers, UploadFile
 
 from core.config import settings
 from core.logging import get_logger
-from services.mail import fm
 from core.security import create_access_token
 
 logger = get_logger("mail_tasks")

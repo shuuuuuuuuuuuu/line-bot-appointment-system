@@ -21,15 +21,17 @@
 ```
 line-bot-appointment-system/
 ├── app/                        # 後端 FastAPI 核心程式碼
+│   ├── api/                    # 公開、管理與 Webhook API routers
 │   ├── alembic/                # 資料庫遷移歷史紀錄
 │   ├── common/                 # 共用工具與常數 (utils.py)
 │   ├── core/                   # 核心配置、資料庫連線、安全性與請求日誌系統
 │   ├── db/                     # 資料庫 Models、Repositories 與 Schemas
 │   ├── services/               # 核心業務邏輯（預約管理、空閒時段計算、Line / Google 日曆 / 郵件整合）
 │   └── tests/                  # 單元測試與 API 測試（Pytest）
-├── frontend/                   # 前端 Vue 3 專案目錄
+├── frontend/                   # LINE LIFF 預約前端
 │   ├── src/                    # 前端原始碼 (App.vue, components, assets)
 │   └── public/                 # 靜態資源 (SVG 圖標、Favicon)
+├── admin-frontend/             # 獨立 Vue 3 管理後台
 ├── docker-compose.yml          # 多容器架構部署設定
 ├── pytest.ini                  # 測試框架設定
 └── requirements-dev.txt        # 開發環境依賴套件
@@ -127,10 +129,17 @@ docker compose up -d --build
 | 服務 | 網址 |
 |------|------|
 | 前端（Vue / LIFF 預約頁） | http://localhost:5173 |
+| 管理後台（Vue） | http://localhost:5174 |
 | 後端 API | http://localhost:8000 |
 | Swagger UI | http://localhost:8000/docs |
 | MySQL | localhost:3307 |
 | Redis | localhost:6379 |
+
+後端路由依用途分為：
+
+- `app/api/public.py`：LIFF 預約頁使用的公開 API。
+- `app/api/webhooks.py`：LINE 等外部服務的 Webhook。
+- `app/api/admin.py`：管理後台專用 API，新增功能前應先加上管理員認證。
 
 ### 4. 執行單元測試
 
