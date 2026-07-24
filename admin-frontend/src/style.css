@@ -27,6 +27,48 @@ input {
   min-height: 100vh;
 }
 
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, #dbeafe 0%, transparent 45%),
+    linear-gradient(160deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+.login-card {
+  width: min(420px, 100%);
+  border: 1px solid #e2e8f0;
+}
+
+.login-card h1 {
+  margin: 4px 0 8px;
+  font-size: 28px;
+}
+
+.login-card .subtitle {
+  margin: 0 0 24px;
+  color: #64748b;
+}
+
+.login-button {
+  width: 100%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-email {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 400;
+}
+
 .sidebar {
   border-right: 1px solid #e5e7eb;
   background: #fff;
@@ -59,8 +101,94 @@ input {
   margin-bottom: 28px;
 }
 
-.page-heading h1 {
-  margin: 4px 0 8px;
+.page-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.toolbar-hint {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -2px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.drag-handle:hover:not(.disabled) {
+  color: #409eff;
+  background: #eff6ff;
+}
+
+.drag-handle:active:not(.disabled) {
+  cursor: grabbing;
+}
+
+.drag-handle.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sort-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  color: #64748b;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.el-table .drag-col .cell {
+  padding: 0 !important;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.drag-ghost {
+  background: #eff6ff !important;
+  opacity: 0.85;
+}
+
+.drag-chosen > td {
+  background: #f8fafc !important;
+}
+
+.drag-dragging {
+  opacity: 0.92;
+}
+
+.template-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #64748b;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: pre-wrap;
 }
 
 .page-heading p {

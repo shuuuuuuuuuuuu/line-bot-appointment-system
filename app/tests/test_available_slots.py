@@ -16,6 +16,28 @@ def test_off_day_returns_empty():
     assert slots == []
 
 
+def test_holiday_returns_empty():
+    slots = get_available_slots_logic(
+        [], [], [], [], MONDAY, holiday_dates={MONDAY}
+    )
+    assert slots == []
+
+
+def test_custom_hours_and_interval():
+    slots = get_available_slots_logic(
+        [],
+        [],
+        [],
+        [],
+        MONDAY,
+        open_hour=10,
+        close_hour=12,
+        slot_interval_minutes=30,
+        off_weekdays=[],
+    )
+    assert slots == ["10:00", "10:30", "11:00", "11:30"]
+
+
 def test_confirmed_slot_is_excluded():
     confirmed = [{
         "start": "2030-01-07T10:00:00+08:00",

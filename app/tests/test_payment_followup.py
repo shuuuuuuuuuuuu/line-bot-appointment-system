@@ -54,7 +54,7 @@ async def test_first_timeout_sends_reminder_and_extends_deadline(db_session):
 
         mock_line.assert_called_once_with(
             "U_followup",
-            followup.PAYMENT_REMINDER_MESSAGE,
+            "匯款後請務必提供匯款資訊，才算預約成功呦！",
         )
         db_session.refresh(appointment)
         assert appointment.payment_reminder_sent is True
@@ -108,7 +108,7 @@ async def test_second_timeout_cancels_and_deletes_appointment(db_session):
 
         mock_line.assert_called_once_with(
             "U_final",
-            followup.PAYMENT_EXPIRED_MESSAGE,
+            "收款逾期，您的預約已取消。請重新預約。",
         )
         mock_unlock.assert_called_once_with("2030-01-07", "11:00")
         mock_delete_event.assert_called_once()

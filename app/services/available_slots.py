@@ -9,6 +9,9 @@ TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 # 連接redis
 r = redis.StrictRedis(host=settings.REDIS_HOST, port=6379, db=0, decode_responses=True)
 
+DEFAULT_OFF_WEEKDAYS = [4, 5, 6]
+
+
 # 取得該日期所有被暫時佔用的時段
 def get_pending_slots(date_str):
     
@@ -21,13 +24,14 @@ def delete_pending_slot(date_str, time_str):
     lock_key = f"pending_slot:{date_str}:{time_str}"
     r.delete(lock_key)
 
-def try_lock_slot(date_str: str, time_str: str, user_id: str):
+def try_lock_slot(date_str: str, time_str: str, user_id: str, lock_minutes: int = 10):
     
     lock_key = f"pending_slot:{date_str}:{time_str}"
     uid = str(user_id) if user_id else "anonymous"
+    ttl = max(int(lock_minutes or 10), 1) * 60
     
-    # nx=True: 不存在才設定, ex=600: 10分鐘過期
-    success = r.set(lock_key, uid, ex=600, nx=True)
+    # nx=True: 不存在才設定
+    success = r.set(lock_key, uid, ex=ttl, nx=True)
     
     if success:
         return {"success": True, "message": "鎖定成功"}
@@ -35,7 +39,7 @@ def try_lock_slot(date_str: str, time_str: str, user_id: str):
     # 失敗時檢查是否為本人
     current_locker = r.get(lock_key)
     if current_locker == uid:
-        r.expire(lock_key, 600)  # 續期
+        r.expire(lock_key, ttl)  # 續期
         return {"success": True, "message": "續期成功"}
     
     return {"success": False, "message": "該時段已被佔用"}
@@ -73,49 +77,65 @@ def _format_busy_ranges(busy_slots, buffer_minutes):
 
 
 # 提取可提供服務時段
-def get_available_slots_logic(busy_slots, confirmed_slots, pending_slots, db_pending_slots, target_date_str):
-    
-    # 定義營業範圍 -> 未來後台系統input
-    OPEN_HOUR = 9
-    CLOSE_HOUR = 21
-    DURATION_MINUTES = 60
-    BUFFER = 60
-    OFF_DAYS = [4, 5, 6] # 不提供服務 (五、六、日)
-    
+def get_available_slots_logic(
+    busy_slots,
+    confirmed_slots,
+    pending_slots,
+    db_pending_slots,
+    target_date_str,
+    *,
+    open_hour=9,
+    close_hour=21,
+    slot_interval_minutes=60,
+    buffer_minutes=60,
+    off_weekdays=None,
+    holiday_dates=None,
+    max_advance_days=None,
+):
+    off_days = list(off_weekdays) if off_weekdays is not None else list(DEFAULT_OFF_WEEKDAYS)
+    holidays = set(holiday_dates or [])
+    interval = max(int(slot_interval_minutes or 60), 15)
+    buffer = max(int(buffer_minutes or 0), 0)
+
     target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
-    if target_dt.weekday() in OFF_DAYS:
-        return [] 
+    if target_date_str in holidays or target_dt.weekday() in off_days:
+        return []
+
+    if max_advance_days is not None:
+        today = datetime.now(TAIPEI_TZ).replace(tzinfo=None).date()
+        if target_dt.date() > today + timedelta(days=int(max_advance_days)):
+            return []
+        if target_dt.date() < today:
+            return []
 
     available_times = []
-    # 可選時段 (每小時一個)
-    current_time = datetime.strptime(f"{target_date_str} {OPEN_HOUR:02d}:00", "%Y-%m-%d %H:%M")
-    end_of_day = datetime.strptime(f"{target_date_str} {CLOSE_HOUR:02d}:00", "%Y-%m-%d %H:%M")
-
-    # Google Calendar + DB 已確認 / 待付款預約，皆依服務結束時間再加 buffer
-    formatted_busy = _format_busy_ranges(
-        list(busy_slots or []) + list(confirmed_slots or []) + list(db_pending_slots or []),
-        BUFFER,
+    current_time = datetime.strptime(
+        f"{target_date_str} {int(open_hour):02d}:00", "%Y-%m-%d %H:%M"
+    )
+    end_of_day = datetime.strptime(
+        f"{target_date_str} {int(close_hour):02d}:00", "%Y-%m-%d %H:%M"
     )
 
-    # 逐一檢查時段是否衝突
-    while current_time + timedelta(minutes=DURATION_MINUTES) <= end_of_day:
+    formatted_busy = _format_busy_ranges(
+        list(busy_slots or []) + list(confirmed_slots or []) + list(db_pending_slots or []),
+        buffer,
+    )
+
+    while current_time + timedelta(minutes=interval) <= end_of_day:
         slot_start = current_time
         slot_start_str = slot_start.strftime("%H:%M")
-        slot_end = current_time + timedelta(minutes=DURATION_MINUTES)
+        slot_end = current_time + timedelta(minutes=interval)
         
-        # 檢查衝突 google calendar / db 忙碌區間、redis 暫時鎖定
         is_conflict = (
             any(slot_start < b['end'] and slot_end > b['start'] for b in formatted_busy) or
             (slot_start_str in pending_slots)
         )
 
         if not is_conflict:
-            # 檢查今天的時間是否已過去
             now_taipei = datetime.now(TAIPEI_TZ).replace(tzinfo=None)
             if slot_start > now_taipei:
                 available_times.append(slot_start_str)
         
-        # 移動到下一個時段 (這裡設定 1 小時跳一次)
-        current_time += timedelta(minutes=DURATION_MINUTES)
+        current_time += timedelta(minutes=interval)
 
     return available_times

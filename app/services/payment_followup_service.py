@@ -12,12 +12,11 @@ from services.google_calendar_service import (
     get_calendar_service,
 )
 from services.line_service import send_line_message
+from services.message_template_service import get_rendered_message
 
 logger = get_logger("payment_followup")
 
 PAYMENT_WINDOW = timedelta(hours=1)
-PAYMENT_REMINDER_MESSAGE = "匯款後請務必提供匯款資訊，才算預約成功呦！"
-PAYMENT_EXPIRED_MESSAGE = "收款逾期，您的預約已取消。請重新預約。"
 
 _scheduled_appointment_ids: Set[int] = set()
 
@@ -53,7 +52,12 @@ def _cancel_expired_appointment(db, appointment) -> None:
     start_dt = appointment.service_dateTime
 
     try:
-        send_line_message(line_user_id, PAYMENT_EXPIRED_MESSAGE)
+        message = get_rendered_message(
+            db,
+            "payment_expired",
+            fallback="收款逾期，您的預約已取消。請重新預約。",
+        )
+        send_line_message(line_user_id, message)
     except Exception as e:
         logger.error(
             "逾期取消推播失敗 (appointment_id=%s): %s",
@@ -132,7 +136,12 @@ async def payment_followup_loop(appointment_id: int):
                 db.commit()
 
                 try:
-                    send_line_message(line_user_id, PAYMENT_REMINDER_MESSAGE)
+                    message = get_rendered_message(
+                        db,
+                        "payment_reminder",
+                        fallback="匯款後請務必提供匯款資訊，才算預約成功呦！",
+                    )
+                    send_line_message(line_user_id, message)
                 except Exception as e:
                     logger.error(
                         "匯款提醒推播失敗 (appointment_id=%s): %s",

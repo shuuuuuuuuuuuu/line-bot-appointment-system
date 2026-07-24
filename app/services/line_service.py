@@ -152,11 +152,9 @@ def handle_image_message(event):
 
 
 def send_payment_instruction(data: db.schemas.AppointmentCreate):
-    
     service_text = "、".join(data.service_items)
-    
     time_display = format_appointment_time(data.service_dateTime)
-    
+
     message_row = ""
     if data.user_message and data.user_message.strip():
         message_row = f"🔆簡述問題：{data.user_message}\n"
@@ -171,7 +169,7 @@ def send_payment_instruction(data: db.schemas.AppointmentCreate):
         else:
             fee = 2222
 
-    message = (
+    fallback = (
         f"嗨～ {data.first_name}，您的預約資料已送出\n"
         "感謝您的預約！\n"
         "\n"
@@ -189,4 +187,26 @@ def send_payment_instruction(data: db.schemas.AppointmentCreate):
         "🔆 帳號：013560086819\n"
         f"🔆 費用：${fee:,}\n"
     )
+
+    db = SessionLocal()
+    try:
+        from services.message_template_service import get_rendered_message
+
+        message = get_rendered_message(
+            db,
+            "payment_instruction",
+            category_name=data.category,
+            variables={
+                "first_name": data.first_name,
+                "time_display": time_display,
+                "category": data.category or "",
+                "service_text": service_text,
+                "message_row": message_row,
+                "fee": f"{fee:,}",
+            },
+            fallback=fallback,
+        )
+    finally:
+        db.close()
+
     send_line_message(data.line_user_id, message)

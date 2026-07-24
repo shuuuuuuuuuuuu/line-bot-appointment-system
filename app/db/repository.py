@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta
+from typing import List, Optional
+import json
 from db import models, schemas
 from core.logging import get_logger
 
@@ -9,9 +11,245 @@ logger = get_logger("repository")
 def get_categories(db: Session):
     return db.query(models.Category).all()
 
-# 查詢特定分類的服務
+# 查詢特定分類的服務（公開：僅啟用）
 def get_services_by_category_id(db: Session, cat_id: int):
-    return db.query(models.Service).filter(models.Service.category_id == cat_id).all()
+    return (
+        db.query(models.Service)
+        .filter(
+            models.Service.category_id == cat_id,
+            models.Service.is_active == True,
+        )
+        .order_by(models.Service.sort_order.asc(), models.Service.id.asc())
+        .all()
+    )
+
+
+def get_service_by_id(db: Session, service_id: int):
+    return (
+        db.query(models.Service)
+        .options(joinedload(models.Service.category))
+        .filter(models.Service.id == service_id)
+        .first()
+    )
+
+
+def list_admin_services(db: Session, category_id: Optional[int] = None):
+    query = db.query(models.Service).options(joinedload(models.Service.category))
+    if category_id is not None:
+        query = query.filter(models.Service.category_id == category_id)
+    return query.order_by(
+        models.Service.category_id.asc(),
+        models.Service.sort_order.asc(),
+        models.Service.id.asc(),
+    ).all()
+
+
+def create_service(db: Session, data: schemas.ServiceCreate):
+    category = db.query(models.Category).filter(models.Category.id == data.category_id).first()
+    if not category:
+        raise ValueError("分類不存在")
+
+    service = models.Service(
+        service_name=data.service_name.strip(),
+        category_id=data.category_id,
+        price=data.price,
+        duration_minutes=data.duration_minutes,
+        is_active=data.is_active,
+        sort_order=data.sort_order,
+    )
+    db.add(service)
+    db.commit()
+    db.refresh(service)
+    return get_service_by_id(db, service.id)
+
+
+def update_service(db: Session, service_id: int, data: schemas.ServiceUpdate):
+    service = get_service_by_id(db, service_id)
+    if not service:
+        return None
+
+    payload = data.model_dump(exclude_unset=True)
+    if "service_name" in payload and payload["service_name"] is not None:
+        payload["service_name"] = payload["service_name"].strip()
+    if "category_id" in payload:
+        category = (
+            db.query(models.Category)
+            .filter(models.Category.id == payload["category_id"])
+            .first()
+        )
+        if not category:
+            raise ValueError("分類不存在")
+
+    for key, value in payload.items():
+        setattr(service, key, value)
+
+    db.commit()
+    return get_service_by_id(db, service_id)
+
+
+def reorder_services(db: Session, items: List[schemas.ServiceReorderItem]):
+    ids = [item.id for item in items]
+    if len(ids) != len(set(ids)):
+        raise ValueError("排序清單含重複服務")
+
+    services = (
+        db.query(models.Service)
+        .filter(models.Service.id.in_(ids))
+        .all()
+    )
+    by_id = {service.id: service for service in services}
+    missing = [service_id for service_id in ids if service_id not in by_id]
+    if missing:
+        raise ValueError("部分服務不存在")
+
+    for item in items:
+        by_id[item.id].sort_order = item.sort_order
+
+    db.commit()
+    return list_admin_services(db)
+
+
+def delete_service(db: Session, service_id: int) -> Optional[str]:
+    """刪除服務。若已有預約引用則改為停用。回傳 'deleted' | 'disabled' | None。"""
+    service = get_service_by_id(db, service_id)
+    if not service:
+        return None
+
+    referenced = (
+        db.query(models.AppointmentItem)
+        .filter(models.AppointmentItem.service_id == service_id)
+        .first()
+    )
+    if referenced:
+        service.is_active = False
+        db.commit()
+        return "disabled"
+
+    db.delete(service)
+    db.commit()
+    return "deleted"
+
+
+def list_message_templates(db: Session, key: Optional[str] = None):
+    query = db.query(models.MessageTemplate).options(
+        joinedload(models.MessageTemplate.category)
+    )
+    if key:
+        query = query.filter(models.MessageTemplate.key == key)
+    return query.order_by(
+        models.MessageTemplate.key.asc(),
+        models.MessageTemplate.category_id.asc(),
+        models.MessageTemplate.id.asc(),
+    ).all()
+
+
+def get_message_template_by_id(db: Session, template_id: int):
+    return (
+        db.query(models.MessageTemplate)
+        .options(joinedload(models.MessageTemplate.category))
+        .filter(models.MessageTemplate.id == template_id)
+        .first()
+    )
+
+
+def get_message_template(
+    db: Session,
+    key: str,
+    category_id: Optional[int] = None,
+    category_name: Optional[str] = None,
+):
+    """優先取指定分類範本，其次取不分分類的通用範本。"""
+    query = db.query(models.MessageTemplate).filter(
+        models.MessageTemplate.key == key,
+        models.MessageTemplate.is_active == True,
+    )
+
+    resolved_category_id = category_id
+    if resolved_category_id is None and category_name:
+        category = (
+            db.query(models.Category)
+            .filter(models.Category.category_name.contains(category_name))
+            .first()
+        )
+        if not category and category_name:
+            # 寬鬆比對：分類名包含關鍵字
+            for keyword in ("頌缽", "靈氣", "阿卡西"):
+                if keyword in category_name:
+                    category = (
+                        db.query(models.Category)
+                        .filter(models.Category.category_name.contains(keyword))
+                        .first()
+                    )
+                    break
+        if category:
+            resolved_category_id = category.id
+
+    if resolved_category_id is not None:
+        specific = query.filter(
+            models.MessageTemplate.category_id == resolved_category_id
+        ).first()
+        if specific:
+            return specific
+
+    return query.filter(models.MessageTemplate.category_id.is_(None)).first()
+
+
+def _find_template_conflict(
+    db: Session,
+    key: str,
+    category_id: Optional[int],
+    exclude_id: Optional[int] = None,
+):
+    query = db.query(models.MessageTemplate).filter(
+        models.MessageTemplate.key == key,
+    )
+    if category_id is None:
+        query = query.filter(models.MessageTemplate.category_id.is_(None))
+    else:
+        query = query.filter(models.MessageTemplate.category_id == category_id)
+    if exclude_id is not None:
+        query = query.filter(models.MessageTemplate.id != exclude_id)
+    return query.first()
+
+
+def update_message_template(
+    db: Session,
+    template_id: int,
+    data: schemas.MessageTemplateUpdate,
+):
+    template = get_message_template_by_id(db, template_id)
+    if not template:
+        return None
+
+    payload = data.model_dump(exclude_unset=True)
+    next_category_id = (
+        payload["category_id"] if "category_id" in payload else template.category_id
+    )
+
+    if "category_id" in payload and payload["category_id"] is not None:
+        category = (
+            db.query(models.Category)
+            .filter(models.Category.id == payload["category_id"])
+            .first()
+        )
+        if not category:
+            raise ValueError("分類不存在")
+
+    if "category_id" in payload and _find_template_conflict(
+        db, template.key, next_category_id, exclude_id=template_id
+    ):
+        raise ValueError("相同觸發時機與分類的範本已存在")
+
+    for field, value in payload.items():
+        if field == "name" and isinstance(value, str):
+            value = value.strip()
+        if field == "description" and isinstance(value, str):
+            value = value.strip() or None
+        setattr(template, field, value)
+
+    db.commit()
+    return get_message_template_by_id(db, template_id)
+
 
 # 建立預約資料
 def create_appointment(db: Session, data: schemas.AppointmentCreate):
@@ -267,3 +505,139 @@ def _appointment_to_busy_range(appointment) -> dict:
         "start": f"{start.isoformat()}+08:00",
         "end": f"{end.isoformat()}+08:00",
     }
+
+
+DEFAULT_OFF_WEEKDAYS = [4, 5, 6]
+
+
+def parse_off_weekdays(raw) -> list[int]:
+    if raw is None:
+        return list(DEFAULT_OFF_WEEKDAYS)
+    if isinstance(raw, list):
+        return [int(x) for x in raw]
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [int(x) for x in parsed if 0 <= int(x) <= 6]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return list(DEFAULT_OFF_WEEKDAYS)
+
+
+def get_or_create_business_settings(db: Session) -> models.BusinessSetting:
+    row = (
+        db.query(models.BusinessSetting)
+        .order_by(models.BusinessSetting.id.asc())
+        .first()
+    )
+    if row:
+        return row
+    row = models.BusinessSetting(
+        open_hour=9,
+        close_hour=21,
+        slot_interval_minutes=60,
+        buffer_minutes=60,
+        off_weekdays=json.dumps(DEFAULT_OFF_WEEKDAYS),
+        max_advance_days=30,
+        slot_lock_minutes=10,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_business_holidays(db: Session):
+    return (
+        db.query(models.BusinessHoliday)
+        .order_by(models.BusinessHoliday.holiday_date.asc())
+        .all()
+    )
+
+
+def business_settings_to_out(db: Session) -> schemas.BusinessSettingsOut:
+    row = get_or_create_business_settings(db)
+    holidays = list_business_holidays(db)
+    return schemas.BusinessSettingsOut(
+        open_hour=row.open_hour,
+        close_hour=row.close_hour,
+        slot_interval_minutes=row.slot_interval_minutes,
+        buffer_minutes=row.buffer_minutes,
+        off_weekdays=parse_off_weekdays(row.off_weekdays),
+        max_advance_days=row.max_advance_days,
+        slot_lock_minutes=row.slot_lock_minutes,
+        holidays=[
+            schemas.BusinessHolidayOut(
+                id=h.id,
+                holiday_date=h.holiday_date.isoformat(),
+                name=h.name,
+            )
+            for h in holidays
+        ],
+    )
+
+
+def update_business_settings(db: Session, data: schemas.BusinessSettingsUpdate):
+    row = get_or_create_business_settings(db)
+    payload = data.model_dump(exclude_unset=True)
+
+    if "off_weekdays" in payload and payload["off_weekdays"] is not None:
+        days = payload["off_weekdays"]
+        if not isinstance(days, list) or any(
+            not isinstance(d, int) or d < 0 or d > 6 for d in days
+        ):
+            raise ValueError("休假曜日須為 0–6（週一至週日）的整數陣列")
+        payload["off_weekdays"] = json.dumps(sorted(set(days)))
+
+    open_hour = payload.get("open_hour", row.open_hour)
+    close_hour = payload.get("close_hour", row.close_hour)
+    if open_hour >= close_hour:
+        raise ValueError("開始營業時間須早於結束時間")
+
+    for field, value in payload.items():
+        setattr(row, field, value)
+
+    db.commit()
+    db.refresh(row)
+    return business_settings_to_out(db)
+
+
+def create_business_holiday(db: Session, data: schemas.BusinessHolidayCreate):
+    try:
+        holiday_date = datetime.strptime(data.holiday_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("日期格式須為 YYYY-MM-DD") from exc
+
+    existing = (
+        db.query(models.BusinessHoliday)
+        .filter(models.BusinessHoliday.holiday_date == holiday_date)
+        .first()
+    )
+    if existing:
+        raise ValueError("此日期已設為休假日")
+
+    row = models.BusinessHoliday(
+        holiday_date=holiday_date,
+        name=(data.name or "").strip() or None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return schemas.BusinessHolidayOut(
+        id=row.id,
+        holiday_date=row.holiday_date.isoformat(),
+        name=row.name,
+    )
+
+
+def delete_business_holiday(db: Session, holiday_id: int) -> bool:
+    row = (
+        db.query(models.BusinessHoliday)
+        .filter(models.BusinessHoliday.id == holiday_id)
+        .first()
+    )
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True

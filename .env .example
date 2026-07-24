@@ -24,12 +24,18 @@ MAIL_PORT=587
 # You can generate a secret using: openssl rand -hex 32
 JWT_SECRET=your_random_jwt_secret_here
 
+# Optional: used only when creating the first admin account
+# ADMIN_EMAIL=owner@example.com
+# ADMIN_PASSWORD=change-me-now
+
 # --- Frontend & Integration ---
 # Your ngrok or production domain (e.g., https://your-app.com)
 BASE_URL=your_domain
 PAYMENT_URL=your_payment_link
 VITE_LIFF_ID=your_liff_id_here
-VITE_API_URL=your_domain/api
+VITE_API_URL=http://localhost:8000
+# Admin UI API base (defaults to http://localhost:8000 in docker-compose)
+VITE_ADMIN_API_URL=http://localhost:8000
 
 # --- Infrastructure ---
 REDIS_HOST=redis

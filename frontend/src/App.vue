@@ -76,7 +76,7 @@
           />
         </el-form-item>
 
-        <!-- 日期選擇 (限制今天起一個月內) -->
+        <!-- 日期選擇 -->
         <el-form-item label="預約日期">
           <el-date-picker
             v-model="form.date"
@@ -157,6 +157,22 @@ const selectedCategoryId = ref(null);
 const availableSlots = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
+const businessSettings = ref({
+  off_weekdays: [4, 5, 6],
+  max_advance_days: 30,
+  holidays: [],
+});
+
+function pyWeekdayToJs(pyDay) {
+  return (pyDay + 1) % 7;
+}
+
+function toDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 // --- 取得所有類別 ---
 const fetchCategories = async () => {
@@ -165,6 +181,19 @@ const fetchCategories = async () => {
     categories.value = response.data;
   } catch (error) {
     console.error("獲取類別失敗:", error);
+  }
+};
+
+const fetchBusinessSettings = async () => {
+  try {
+    const response = await api.get("/business-settings");
+    businessSettings.value = {
+      off_weekdays: response.data.off_weekdays ?? [4, 5, 6],
+      max_advance_days: response.data.max_advance_days ?? 30,
+      holidays: response.data.holidays ?? [],
+    };
+  } catch (error) {
+    console.error("獲取營業設定失敗:", error);
   }
 };
 
@@ -200,7 +229,7 @@ const handleCategoryChange = async (catId) => {
 };
 
 onMounted(async () => {
-  await fetchCategories(); // 改為先抓類別
+  await Promise.all([fetchCategories(), fetchBusinessSettings()]);
 
   try {
     await liff.init({ liffId: "2009928780-6PHEbZpr" });
@@ -218,12 +247,20 @@ onMounted(async () => {
 const disabledDateLogic = (time) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const oneMonthLater = new Date();
-  oneMonthLater.setMonth(today.getMonth() + 1);
+  const maxDate = new Date(today);
+  maxDate.setDate(
+    maxDate.getDate() + (businessSettings.value.max_advance_days || 30),
+  );
+  const dateStr = toDateStr(time);
+  const offJsDays = (businessSettings.value.off_weekdays || []).map(pyWeekdayToJs);
+  const holidaySet = new Set(
+    (businessSettings.value.holidays || []).map((h) => h.holiday_date),
+  );
   const isPast = time.getTime() < today.getTime();
-  const isTooFar = time.getTime() > oneMonthLater.getTime();
-  const isOffDay = [5, 6, 0].includes(time.getDay());
-  return isPast || isTooFar || isOffDay;
+  const isTooFar = time.getTime() > maxDate.getTime();
+  const isOffDay = offJsDays.includes(time.getDay());
+  const isHoliday = holidaySet.has(dateStr);
+  return isPast || isTooFar || isOffDay || isHoliday;
 };
 
 const handleDateChange = async (val) => {
@@ -288,17 +325,26 @@ const selectedCategory = computed(() =>
 );
 
 const serviceDuration = computed(() => {
-  const name = selectedCategory.value?.category_name || "";
-  if (name.includes("頌缽")) return 70;
-  if (name.includes("靈氣")) return 90;
-  return 60;
+  if (!servicesList.value.length || !form.services.length) {
+    return 60;
+  }
+  const selected = servicesList.value.filter((service) =>
+    form.services.includes(service.service_name),
+  );
+  if (!selected.length) return 60;
+  return Math.max(...selected.map((service) => service.duration_minutes || 60));
 });
 
 const servicePrice = computed(() => {
-  const name = selectedCategory.value?.category_name || "";
-  if (name.includes("頌缽")) return 3333;
-  if (name.includes("靈氣")) return 1555;
-  return 2222;
+  if (!servicesList.value.length || !form.services.length) {
+    return 0;
+  }
+  const selected = servicesList.value.filter((service) =>
+    form.services.includes(service.service_name),
+  );
+  if (!selected.length) return 0;
+  // 同類多選（如阿卡西題目）沿用單次療程價；取選取項目中最高價
+  return Math.max(...selected.map((service) => service.price || 0));
 });
 
 const submitForm = async () => {

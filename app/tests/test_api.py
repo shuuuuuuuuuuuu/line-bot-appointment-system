@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -36,21 +39,29 @@ def test_services_filter(client, seeded_db):
     assert data[0]["service_name"] == "感情與人際的糾葛"
 
 
+def _next_weekday(weekday: int) -> str:
+    """Return YYYY-MM-DD for the next date with the given Python weekday (Mon=0)."""
+    day = datetime.now().date() + timedelta(days=1)
+    while day.weekday() != weekday:
+        day += timedelta(days=1)
+    return day.isoformat()
+
+
 def test_available_slots_weekday(client, seeded_db):
-    response = client.get("/available-slots?date=2030-01-07")
+    response = client.get(f"/available-slots?date={_next_weekday(0)}")
     assert response.status_code == 200
     slots = response.json()["available_slots"]
     assert "09:00" in slots
 
 
 def test_available_slots_off_day(client, seeded_db):
-    response = client.get("/available-slots?date=2030-01-04")
+    response = client.get(f"/available-slots?date={_next_weekday(4)}")
     assert response.status_code == 200
     assert response.json()["available_slots"] == []
 
 
 def test_slot_lock_missing_params(client):
-    response = client.post("/api/slot/lock", json={"date": "2030-01-07"})
+    response = client.post("/api/slot/lock", json={"date": _next_weekday(0)})
     assert response.status_code == 400
 
 
@@ -67,6 +78,6 @@ def test_available_slots_falls_back_when_calendar_token_invalid(client, monkeypa
         "services.google_calendar_service.get_calendar_service",
         _raise,
     )
-    response = client.get("/available-slots?date=2030-01-07")
+    response = client.get(f"/available-slots?date={_next_weekday(0)}")
     assert response.status_code == 200
     assert "available_slots" in response.json()

@@ -1,12 +1,12 @@
 import sys
 import os
 
-# 將當前目錄加入路徑
+# 將 app 目錄加入路徑（容器內 WORKDIR=/app）
 sys.path.append(os.getcwd())
 
-import models
-from database import Base
-from config import settings
+from db import models  # noqa: F401
+from core.database import Base
+from core.config import settings
 
 from logging.config import fileConfig
 

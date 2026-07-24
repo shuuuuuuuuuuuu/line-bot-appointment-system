@@ -98,7 +98,7 @@ JWT_SECRET=your_random_jwt_secret_here
 # Frontend & Integration
 BASE_URL=https://your-domain.com
 VITE_LIFF_ID=your_liff_id_here
-VITE_API_URL=https://your-domain.com
+VITE_API_URL=http://localhost:8000
 
 # Infrastructure
 REDIS_HOST=redis
@@ -139,9 +139,37 @@ docker compose up -d --build
 
 - `app/api/public.py`：LIFF 預約頁使用的公開 API。
 - `app/api/webhooks.py`：LINE 等外部服務的 Webhook。
-- `app/api/admin.py`：管理後台專用 API，新增功能前應先加上管理員認證。
+- `app/api/admin.py`：管理後台專用 API（需 Bearer token；依賴 `get_current_admin`）。
 
-### 4. 執行單元測試
+管理後台認證：
+
+- `POST /api/admin/login`：帳密登入，取得 JWT。
+- `GET /api/admin/me`：驗證目前管理員身分。
+- `GET/POST /api/admin/services`、`PUT/DELETE /api/admin/services/{id}`：服務項目 CRUD（皆需 `get_current_admin`）。
+- `GET /api/admin/categories`：管理後台用分類列表。
+- `GET/PUT /api/admin/message-templates`：訊息範本列表與編輯（皆需 `get_current_admin`）。
+- `GET/PUT /api/admin/business-settings`：營業時段、間隔、休假曜日等（皆需 `get_current_admin`）。
+- `POST/DELETE /api/admin/business-holidays`：特定休假日新增／刪除。
+- 公開 `GET /business-settings`：LIFF 用來限制可選日期。
+- Token payload 含 `type=admin`，與郵件審核連結的 JWT 不相通。
+
+### 4. 建立管理員帳號
+
+後台登入使用獨立的管理員帳號。容器啟動後執行：
+
+```bash
+docker compose exec web \
+  env ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD='your-password' \
+  python -m scripts.create_admin
+```
+
+若帳號已存在，此指令會重設密碼並啟用帳號。
+
+然後開啟 **http://localhost:5174** 登入（不是 `:8000`）。
+
+若用 ngrok 開後台，需要兩個 tunnel：`5174`（前端）與 `8000`（API）。請把 `.env` 的 `VITE_ADMIN_API_URL` 設成 API 的 ngrok 網址後重啟 `admin-frontend`。目前你開的 `.../login` 是前端；把登入請求打到同一個網址的 `/api/admin/login` 會 404。
+
+### 5. 執行單元測試
 
 專案內含測試套件，確保核心預約邏輯與 API 穩定度：
 

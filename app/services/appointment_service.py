@@ -7,6 +7,7 @@ from services.google_calendar_service import (
     confirm_calendar_event,
     delete_placeholder_calendar_event,
 )
+from services.message_template_service import get_rendered_message
 from common.utils import format_appointment_time, get_full_name
 from core.logging import get_logger
 
@@ -44,62 +45,22 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
     full_name = get_full_name(updated_appointment.client)
     time_display = format_appointment_time(updated_appointment.service_dateTime)
     category_name = repository.get_appointment_category_name(updated_appointment)
+    first_name = updated_appointment.client.first_name
+    variables = {
+        "time_display": time_display,
+        "first_name": first_name,
+        "full_name": full_name,
+    }
     
     is_paid = (action == "success")
     if is_paid:
-        if "頌缽" in category_name:
-            first_name = updated_appointment.client.first_name
-            msg = f"""收到款項了～我們 {time_display} 見😊
-
-地點在露西森林七樓（台北車站 M2 出口）。
-
-🪐幾個注意事項：
-
-1. 當天不需要提早抵達，準時到就好～
-
-2. 閱讀前 24 小時盡量不要飲酒、使用安眠藥或娛樂性藥物，才能達到最佳療癒效果。
-
-3. 準備好水壺，療癒前後都需要補充很多水。
-
-4. 帶著放鬆與信任的心前來：當天的目的就是讓自己好好放鬆享受波音的療癒與音頻震動的按摩，所以只需要帶著一顆放鬆與信任的心前來就好呦。
-
-希望這場頌缽療癒可以讓{first_name}好好放鬆，獲得身心靈的洗滌與療癒。😇✨"""
-        elif "靈氣" in category_name:
-            msg = f"""收到款項了～我們 {time_display} 遠端見😊
-
-療癒前的準備：
-
-💛 舒適衣著，建議換上寬鬆、無束縛的居家服，讓身體能完全放鬆。
-💛 可以提早 5-10 分鐘，將手機調至靜音或飛航模式，給自己一段完全不受打擾的時光。
-💛 平常心，不需要刻意努力去感覺，只需要帶著一顆開放的心、把自己當作一顆準備充電的電池就好。
-💛 水分補充，靈氣療癒前後都可以喝一點溫開水，幫助能量流動與代謝。
-
-【溫馨提醒】靈氣屬於輔助性方式，非醫療行為，不涉及診斷與療效。若有身體不適或病理症狀，請務必以正規醫療與醫師的醫囑為主。
-
-流程說明
-
-💛 療癒前：靈療師會撥打 Line Audio 說明流程與介紹靈氣
-
-💛 療癒中：結束通話，開始療癒。請被療癒者採舒服靜坐姿勢或躺著放鬆也可以，過程約 60 分鐘。
-
-💛 療癒後：靈療會再次撥打 Line Audio，屆時彼此分享療癒結果與感受。
-
-線上見😊"""
-        else:
-            msg = f"""預約成功！已收到您的款項           
-我們 {time_display} 線上見😊
-
-🪐幾個注意事項：
-
-1. 閱讀前 24 小時不要飲酒、實用安眠藥或娛樂性藥物。解讀時要保持清醒以達到最佳療癒效果。
-
-2. 解讀過程輕鬆像聊天，也可能在過程中延伸其他問題進行療癒。只需要敞開內心接受宇宙最直接的指引😇
-
-3. 我們會用 Line 語音通話方式進行，請確保閱讀過程在安靜、不受干擾且有良好網路收訊的環境。
-
-4. 可以錄音或做筆記：閱讀過程中會有許多訊息與指引，建議可以透過錄音或筆記記錄下來，之後也能反覆回顧與整理。
-
-希望這場對話可以讓懿敏感受到靈魂深處的智慧與啟發，還有來自宇宙無條件的愛與支持💫🤍"""
+        msg = get_rendered_message(
+            db,
+            "approval_success",
+            category_name=category_name,
+            variables=variables,
+            fallback=f"預約成功！已收到您的款項\n我們 {time_display} 見😊",
+        )
         try:
             confirm_calendar_event(
                 service=calendar_service,
@@ -111,7 +72,12 @@ def process_appointment_approval(db: Session, appointment_id: int, action: str, 
         except Exception as e:
             logger.error("Google Calendar 同步失敗 (appointment_id=%s): %s", appointment_id, e, exc_info=True)
     else:
-        msg = "您的預約已取消。請重新預約。"
+        msg = get_rendered_message(
+            db,
+            "approval_reject",
+            variables=variables,
+            fallback="您的預約已取消。請重新預約。",
+        )
         try:
             delete_placeholder_calendar_event(
                 service=calendar_service,

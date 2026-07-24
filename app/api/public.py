@@ -31,6 +31,11 @@ def list_categories(db: Session = Depends(get_db)):
     return repository.get_categories(db)
 
 
+@router.get("/business-settings", response_model=db.schemas.BusinessSettingsOut)
+def get_business_settings(db: Session = Depends(get_db)):
+    return repository.business_settings_to_out(db)
+
+
 @router.get("/services/filter", response_model=List[db.schemas.Service])
 def filter_services(category_id: int, db: Session = Depends(get_db)):
     return repository.get_services_by_category_id(db, cat_id=category_id)
@@ -53,6 +58,8 @@ def read_slots(date: str, db: Session = Depends(get_db)):
         pending_slots = get_pending_slots(date)
         confirmed_slots = repository.get_confirmed_slots(db, date)
         db_pending_slots = repository.get_db_pending_slots(db, date)
+        biz = repository.business_settings_to_out(db)
+        holiday_dates = {h.holiday_date for h in biz.holidays}
 
         available = get_available_slots_logic(
             busy_slots,
@@ -60,6 +67,13 @@ def read_slots(date: str, db: Session = Depends(get_db)):
             pending_slots,
             db_pending_slots,
             date,
+            open_hour=biz.open_hour,
+            close_hour=biz.close_hour,
+            slot_interval_minutes=biz.slot_interval_minutes,
+            buffer_minutes=biz.buffer_minutes,
+            off_weekdays=biz.off_weekdays,
+            holiday_dates=holiday_dates,
+            max_advance_days=biz.max_advance_days,
         )
         return {"available_slots": available}
     except Exception as exc:
@@ -104,7 +118,7 @@ def create_appointment(
 
 
 @router.post("/api/slot/lock")
-async def lock_slot(request: Request):
+async def lock_slot(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     date_str = data.get("date")
     time_str = data.get("time")
@@ -113,7 +127,13 @@ async def lock_slot(request: Request):
     if not date_str or not time_str:
         raise HTTPException(status_code=400, detail="日期與時間為必填")
 
-    return try_lock_slot(date_str, time_str, user_id)
+    biz = repository.get_or_create_business_settings(db)
+    return try_lock_slot(
+        date_str,
+        time_str,
+        user_id,
+        lock_minutes=biz.slot_lock_minutes,
+    )
 
 
 @router.post("/api/slot/action")

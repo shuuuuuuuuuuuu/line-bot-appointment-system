@@ -36,6 +36,16 @@ app.include_router(webhooks.router)
 app.include_router(admin.router)
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "Line Bot Appointment API",
+        "docs": "/docs",
+        "admin_ui": "http://localhost:5174",
+        "admin_login_api": "POST /api/admin/login",
+    }
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     if isinstance(exc, HTTPException):
