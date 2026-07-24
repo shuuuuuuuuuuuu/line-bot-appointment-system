@@ -76,7 +76,8 @@ services:
     ports:
       - "5174:5174"
     environment:
-      # 管理後台預設打本機 API；勿共用 LIFF 的 ngrok URL，避免開錯網址看到 404
+      # 明確傳入後台 API；勿與 LIFF 的 VITE_API_URL 共用同一個 compose 變數名
+      - VITE_ADMIN_API_URL=${VITE_ADMIN_API_URL:-http://localhost:8000}
       - VITE_API_URL=${VITE_ADMIN_API_URL:-http://localhost:8000}
     depends_on:
       - web

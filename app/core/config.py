@@ -25,9 +25,6 @@ class Settings:
     JWT_SECRET = os.getenv("JWT_SECRET")
     ALGORITHM = "HS256"
 
-    # payment url
-    PAYMENT_URL = os.getenv("PAYMENT_URL")
-
     # redis
     REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 

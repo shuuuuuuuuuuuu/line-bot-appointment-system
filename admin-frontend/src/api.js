@@ -2,7 +2,10 @@ import axios from "axios";
 import { clearToken, getToken } from "./auth";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL:
+    import.meta.env.VITE_ADMIN_API_URL ||
+    import.meta.env.VITE_API_URL ||
+    "http://localhost:8000",
   timeout: 15000,
   headers: {
     "ngrok-skip-browser-warning": "true",
@@ -27,7 +30,7 @@ api.interceptors.response.use(
       }
     }
     return Promise.reject(error);
-  },
+  }
 );
 
 export async function login(email, password) {
@@ -82,7 +85,7 @@ export async function fetchMessageTemplates(key) {
 export async function updateMessageTemplate(templateId, payload) {
   const { data } = await api.put(
     `/api/admin/message-templates/${templateId}`,
-    payload,
+    payload
   );
   return data;
 }
@@ -103,7 +106,9 @@ export async function createBusinessHoliday(payload) {
 }
 
 export async function deleteBusinessHoliday(holidayId) {
-  const { data } = await api.delete(`/api/admin/business-holidays/${holidayId}`);
+  const { data } = await api.delete(
+    `/api/admin/business-holidays/${holidayId}`
+  );
   return data;
 }
 
