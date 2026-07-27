@@ -5,6 +5,12 @@ const router = useRouter();
 
 const modules = [
   {
+    title: "數據總覽",
+    description: "查看預約量、營收、待匯款與即將到來的場次。",
+    route: "/stats",
+    enabled: true,
+  },
+  {
     title: "服務項目",
     description: "管理服務名稱、價格、時長與顯示順序。",
     route: "/services",
@@ -44,7 +50,9 @@ function openModule(module) {
         v-for="module in modules"
         :key="module.title"
         :xs="24"
-        :md="8"
+        :sm="12"
+        :md="12"
+        :lg="6"
       >
         <el-card shadow="hover" class="module-card">
           <h2>{{ module.title }}</h2>

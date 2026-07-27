@@ -150,6 +150,7 @@ docker compose up -d --build
 - `GET/PUT /api/admin/message-templates`：訊息範本列表與編輯（皆需 `get_current_admin`）。
 - `GET/PUT /api/admin/business-settings`：營業時段、間隔、休假曜日等（皆需 `get_current_admin`）。
 - `POST/DELETE /api/admin/business-holidays`：特定休假日新增／刪除。
+- `GET /api/admin/stats`：預約／營收數據總覽（`period=week|month|all`）。
 - 公開 `GET /business-settings`：LIFF 用來限制可選日期。
 - Token payload 含 `type=admin`，與郵件審核連結的 JWT 不相通。
 

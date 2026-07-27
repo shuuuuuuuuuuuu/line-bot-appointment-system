@@ -112,4 +112,11 @@ export async function deleteBusinessHoliday(holidayId) {
   return data;
 }
 
+export async function fetchAdminStats(period = "month") {
+  const { data } = await api.get("/api/admin/stats", {
+    params: { period },
+  });
+  return data;
+}
+
 export default api;

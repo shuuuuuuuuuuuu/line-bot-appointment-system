@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -641,3 +642,350 @@ def delete_business_holiday(db: Session, holiday_id: int) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+def _period_bounds(period: str):
+    """Return (start, end) datetimes for stats; end is exclusive. None start = all time."""
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    if period == "week":
+        start = today_start - timedelta(days=today_start.weekday())
+        end = start + timedelta(days=7)
+        return start, end
+    if period == "month":
+        start = datetime(now.year, now.month, 1)
+        if now.month == 12:
+            end = datetime(now.year + 1, 1, 1)
+        else:
+            end = datetime(now.year, now.month + 1, 1)
+        return start, end
+    return None, None
+
+
+def _appointment_status(appointment) -> tuple[str, str]:
+    if appointment.deleted_at is not None:
+        return "cancelled", "已取消"
+    if appointment.paid:
+        return "confirmed", "已確認"
+    if appointment.expired:
+        return "cancelled", "已取消"
+    if appointment.payment_proof_received:
+        return "awaiting_review", "待審核"
+    return "pending_payment", "待匯款"
+
+
+def _appointment_to_stats_row(appointment) -> schemas.AdminStatsAppointmentOut:
+    client = appointment.client
+    client_name = ""
+    if client:
+        client_name = f"{client.last_name or ''}{client.first_name or ''}".strip()
+    service_names = []
+    category_name = None
+    for item in appointment.items or []:
+        service = item.service
+        if not service:
+            continue
+        service_names.append(service.service_name)
+        if category_name is None and service.category:
+            category_name = service.category.category_name
+    status, status_label = _appointment_status(appointment)
+    return schemas.AdminStatsAppointmentOut(
+        id=appointment.id,
+        client_name=client_name or "—",
+        service_date_time=appointment.service_dateTime,
+        total_price=appointment.total_price or 0,
+        total_duration=appointment.total_duration,
+        status=status,
+        status_label=status_label,
+        category_name=category_name,
+        service_names=service_names,
+        user_message=(appointment.user_message or "").strip() or None,
+        payment_proof_received=bool(appointment.payment_proof_received),
+        payment_deadline_at=appointment.payment_deadline_at,
+        created_at=appointment.created_at,
+    )
+
+
+def _appointment_query_options():
+    return (
+        joinedload(models.Appointment.client),
+        joinedload(models.Appointment.items)
+        .joinedload(models.AppointmentItem.service)
+        .joinedload(models.Service.category),
+    )
+
+
+def _appointment_bucket_dt(appointment):
+    return appointment.service_dateTime or appointment.created_at
+
+
+def _build_admin_trend(db: Session, period: str) -> list:
+    """Build confirmed/revenue/cancelled series for charts."""
+    now = datetime.now()
+
+    if period == "week":
+        start, end = _period_bounds("week")
+        granularity = "day"
+    elif period == "month":
+        start, end = _period_bounds("month")
+        granularity = "day"
+    else:
+        # last 12 calendar months including current
+        start = datetime(now.year, now.month, 1) - timedelta(days=365)
+        start = datetime(start.year, start.month, 1)
+        if now.month == 12:
+            end = datetime(now.year + 1, 1, 1)
+        else:
+            end = datetime(now.year, now.month + 1, 1)
+        granularity = "month"
+
+    rows = (
+        db.query(models.Appointment)
+        .filter(
+            (
+                (models.Appointment.service_dateTime >= start)
+                & (models.Appointment.service_dateTime < end)
+            )
+            | (
+                models.Appointment.service_dateTime.is_(None)
+                & (models.Appointment.created_at >= start)
+                & (models.Appointment.created_at < end)
+            )
+        )
+        .all()
+    )
+
+    buckets: dict[str, dict] = {}
+
+    def ensure_bucket(key: str, label: str):
+        if key not in buckets:
+            buckets[key] = {
+                "label": label,
+                "date": key,
+                "confirmed_count": 0,
+                "revenue": 0,
+                "cancelled_count": 0,
+            }
+
+    # Pre-fill empty buckets so the chart has continuous points
+    cursor = start
+    if granularity == "day":
+        while cursor < end:
+            key = cursor.date().isoformat()
+            ensure_bucket(key, cursor.strftime("%m-%d"))
+            cursor += timedelta(days=1)
+    else:
+        while cursor < end:
+            key = f"{cursor.year:04d}-{cursor.month:02d}"
+            ensure_bucket(key, key)
+            if cursor.month == 12:
+                cursor = datetime(cursor.year + 1, 1, 1)
+            else:
+                cursor = datetime(cursor.year, cursor.month + 1, 1)
+
+    for appt in rows:
+        dt = _appointment_bucket_dt(appt)
+        if dt is None:
+            continue
+        if getattr(dt, "tzinfo", None) is not None:
+            dt = dt.replace(tzinfo=None)
+        if granularity == "day":
+            key = dt.date().isoformat()
+            label = dt.strftime("%m-%d")
+        else:
+            key = f"{dt.year:04d}-{dt.month:02d}"
+            label = key
+        if key not in buckets:
+            continue
+        ensure_bucket(key, label)
+
+        is_cancelled = appt.deleted_at is not None or (
+            appt.expired and not appt.paid
+        )
+        if appt.paid and appt.deleted_at is None:
+            buckets[key]["confirmed_count"] += 1
+            buckets[key]["revenue"] += appt.total_price or 0
+        elif is_cancelled:
+            buckets[key]["cancelled_count"] += 1
+
+    return [
+        schemas.AdminStatsTrendPoint(**buckets[key])
+        for key in sorted(buckets.keys())
+    ]
+
+
+def _build_akashic_service_breakdown(db: Session, paid_appointments) -> list:
+    """Count confirmed booking selections per 阿卡西 service item."""
+    category = (
+        db.query(models.Category)
+        .filter(models.Category.category_name.contains("阿卡西"))
+        .first()
+    )
+    if not category:
+        return []
+
+    services = (
+        db.query(models.Service)
+        .filter(models.Service.category_id == category.id)
+        .order_by(models.Service.sort_order.asc(), models.Service.id.asc())
+        .all()
+    )
+    if not services:
+        return []
+
+    counts = {service.id: 0 for service in services}
+    name_by_id = {service.id: service.service_name for service in services}
+
+    for appt in paid_appointments:
+        for item in appt.items or []:
+            service = item.service
+            if not service or service.id not in counts:
+                continue
+            if service.category_id != category.id:
+                continue
+            counts[service.id] += 1
+
+    return [
+        schemas.AdminStatsServiceItemOut(
+            service_name=name_by_id[service_id],
+            booking_count=counts[service_id],
+        )
+        for service_id in sorted(
+            counts.keys(),
+            key=lambda sid: (-counts[sid], name_by_id[sid]),
+        )
+    ]
+
+
+def get_admin_stats(db: Session, period: str = "month") -> schemas.AdminStatsOut:
+    if period not in {"week", "month", "all"}:
+        period = "month"
+
+    start, end = _period_bounds(period)
+    now = datetime.now()
+
+    base = db.query(models.Appointment)
+    if start is not None and end is not None:
+        # Period metrics use service_dateTime when present, else created_at
+        in_period = base.filter(
+            (
+                (models.Appointment.service_dateTime >= start)
+                & (models.Appointment.service_dateTime < end)
+            )
+            | (
+                models.Appointment.service_dateTime.is_(None)
+                & (models.Appointment.created_at >= start)
+                & (models.Appointment.created_at < end)
+            )
+        )
+    else:
+        in_period = base
+
+    confirmed_q = in_period.filter(
+        models.Appointment.paid == True,
+        models.Appointment.deleted_at.is_(None),
+    )
+    confirmed_count = confirmed_q.count()
+    revenue = (
+        confirmed_q.with_entities(
+            func.coalesce(func.sum(models.Appointment.total_price), 0)
+        ).scalar()
+        or 0
+    )
+
+    live_pending = db.query(models.Appointment).filter(
+        models.Appointment.paid == False,
+        models.Appointment.expired == False,
+        models.Appointment.deleted_at.is_(None),
+    )
+    pending_payment_count = live_pending.filter(
+        models.Appointment.payment_proof_received == False
+    ).count()
+    awaiting_review_count = live_pending.filter(
+        models.Appointment.payment_proof_received == True
+    ).count()
+
+    cancelled_q = in_period.filter(
+        (models.Appointment.deleted_at.isnot(None))
+        | (
+            (models.Appointment.expired == True)
+            & (models.Appointment.paid == False)
+        )
+    )
+    cancelled_count = cancelled_q.count()
+
+    upcoming_q = (
+        db.query(models.Appointment)
+        .filter(
+            models.Appointment.paid == True,
+            models.Appointment.deleted_at.is_(None),
+            models.Appointment.service_dateTime >= now,
+        )
+        .order_by(models.Appointment.service_dateTime.asc())
+    )
+    upcoming_count = upcoming_q.count()
+
+    # Category breakdown: distinct appointments per category (avoid double-counting revenue)
+    paid_in_period = confirmed_q.options(*_appointment_query_options()).all()
+    category_map: dict[str, dict] = {}
+    for appt in paid_in_period:
+        names = set()
+        for item in appt.items or []:
+            service = item.service
+            if service and service.category and service.category.category_name:
+                names.add(service.category.category_name)
+        if not names:
+            names.add("未分類")
+        # Split revenue evenly across categories if multi-category (rare)
+        share = (appt.total_price or 0) // max(len(names), 1)
+        remainder = (appt.total_price or 0) - share * len(names)
+        for i, name in enumerate(sorted(names)):
+            bucket = category_map.setdefault(
+                name, {"appointment_count": 0, "revenue": 0}
+            )
+            bucket["appointment_count"] += 1
+            bucket["revenue"] += share + (remainder if i == 0 else 0)
+
+    by_category = [
+        schemas.AdminStatsCategoryOut(
+            category_name=name,
+            appointment_count=data["appointment_count"],
+            revenue=data["revenue"],
+        )
+        for name, data in sorted(
+            category_map.items(), key=lambda x: (-x[1]["revenue"], x[0])
+        )
+    ]
+    by_akashic_service = _build_akashic_service_breakdown(db, paid_in_period)
+
+    upcoming_appointments = [
+        _appointment_to_stats_row(a)
+        for a in upcoming_q.options(*_appointment_query_options()).limit(10).all()
+    ]
+
+    recent = (
+        db.query(models.Appointment)
+        .options(*_appointment_query_options())
+        .order_by(models.Appointment.created_at.desc())
+        .limit(15)
+        .all()
+    )
+    recent_appointments = [_appointment_to_stats_row(a) for a in recent]
+    trend = _build_admin_trend(db, period)
+
+    return schemas.AdminStatsOut(
+        period=period,
+        period_start=start.date().isoformat() if start else None,
+        period_end=(end - timedelta(days=1)).date().isoformat() if end else None,
+        confirmed_count=confirmed_count,
+        revenue=int(revenue),
+        pending_payment_count=pending_payment_count,
+        awaiting_review_count=awaiting_review_count,
+        cancelled_count=cancelled_count,
+        upcoming_count=upcoming_count,
+        by_category=by_category,
+        by_akashic_service=by_akashic_service,
+        trend=trend,
+        upcoming_appointments=upcoming_appointments,
+        recent_appointments=recent_appointments,
+    )

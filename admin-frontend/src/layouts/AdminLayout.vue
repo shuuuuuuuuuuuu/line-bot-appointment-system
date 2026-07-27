@@ -12,6 +12,7 @@ const admin = ref(null);
 const loading = ref(true);
 
 const activeMenu = computed(() => {
+  if (route.path.startsWith("/stats")) return "stats";
   if (route.path.startsWith("/services")) return "services";
   if (route.path.startsWith("/messages")) return "messages";
   if (route.path.startsWith("/settings")) return "settings";
@@ -33,6 +34,10 @@ onMounted(async () => {
 function onMenuSelect(index) {
   if (index === "dashboard") {
     router.push("/");
+    return;
+  }
+  if (index === "stats") {
+    router.push("/stats");
     return;
   }
   if (index === "services") {
@@ -60,6 +65,7 @@ function logout() {
       <div class="brand">預約管理後台</div>
       <el-menu :default-active="activeMenu" @select="onMenuSelect">
         <el-menu-item index="dashboard">總覽</el-menu-item>
+        <el-menu-item index="stats">數據總覽</el-menu-item>
         <el-menu-item index="services">服務項目</el-menu-item>
         <el-menu-item index="messages">訊息範本</el-menu-item>
         <el-menu-item index="settings">營業設定</el-menu-item>

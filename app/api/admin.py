@@ -281,3 +281,12 @@ def delete_admin_business_holiday(
         holiday_id,
     )
     return {"detail": "休假日已刪除"}
+
+
+@router.get("/stats", response_model=schemas.AdminStatsOut)
+def get_admin_stats(
+    period: str = Query(default="month", pattern="^(week|month|all)$"),
+    db: Session = Depends(get_db),
+    _: models.Admin = Depends(get_current_admin),
+):
+    return repository.get_admin_stats(db, period=period)

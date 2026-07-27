@@ -153,6 +153,58 @@ class BusinessSettingsUpdate(BaseModel):
     slot_lock_minutes: Optional[int] = Field(default=None, ge=1, le=120)
 
 
+class AdminStatsCategoryOut(BaseModel):
+    category_name: str
+    appointment_count: int
+    revenue: int
+
+
+class AdminStatsServiceItemOut(BaseModel):
+    service_name: str
+    booking_count: int
+
+
+class AdminStatsTrendPoint(BaseModel):
+    label: str
+    date: str
+    confirmed_count: int
+    revenue: int
+    cancelled_count: int
+
+
+class AdminStatsAppointmentOut(BaseModel):
+    id: int
+    client_name: str
+    service_date_time: Optional[datetime] = None
+    total_price: int = 0
+    total_duration: Optional[int] = None
+    status: str
+    status_label: str
+    category_name: Optional[str] = None
+    service_names: List[str] = []
+    user_message: Optional[str] = None
+    payment_proof_received: bool = False
+    payment_deadline_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class AdminStatsOut(BaseModel):
+    period: str
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    confirmed_count: int
+    revenue: int
+    pending_payment_count: int
+    awaiting_review_count: int
+    cancelled_count: int
+    upcoming_count: int
+    by_category: List[AdminStatsCategoryOut] = []
+    by_akashic_service: List[AdminStatsServiceItemOut] = []
+    trend: List[AdminStatsTrendPoint] = []
+    upcoming_appointments: List[AdminStatsAppointmentOut] = []
+    recent_appointments: List[AdminStatsAppointmentOut] = []
+
+
 class AdminLogin(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)

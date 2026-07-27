@@ -7,6 +7,7 @@ import LoginView from "./views/LoginView.vue";
 import ServicesView from "./views/ServicesView.vue";
 import MessagesView from "./views/MessagesView.vue";
 import SettingsView from "./views/SettingsView.vue";
+import StatsView from "./views/StatsView.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -25,6 +26,11 @@ const router = createRouter({
           path: "",
           name: "dashboard",
           component: DashboardView,
+        },
+        {
+          path: "stats",
+          name: "stats",
+          component: StatsView,
         },
         {
           path: "services",
