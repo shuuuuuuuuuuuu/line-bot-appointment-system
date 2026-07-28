@@ -159,6 +159,21 @@ const hasActiveFilters = computed(() =>
   ),
 );
 
+const appointmentPage = ref(1);
+const APPOINTMENT_PAGE_SIZE = 10;
+
+const paginatedAppointmentRows = computed(() => {
+  const start = (appointmentPage.value - 1) * APPOINTMENT_PAGE_SIZE;
+  return filteredAppointmentRows.value.slice(
+    start,
+    start + APPOINTMENT_PAGE_SIZE,
+  );
+});
+
+function resetAppointmentPage() {
+  appointmentPage.value = 1;
+}
+
 function formatMoney(n) {
   return `$${Number(n || 0).toLocaleString("zh-TW")}`;
 }
@@ -237,8 +252,27 @@ function resetAppointmentFilters() {
   tableFilters.status_label = [];
 }
 
+watch(
+  tableFilters,
+  () => {
+    resetAppointmentPage();
+  },
+  { deep: true },
+);
+
+watch(
+  () => filteredAppointmentRows.value.length,
+  (total) => {
+    const maxPage = Math.max(1, Math.ceil(total / APPOINTMENT_PAGE_SIZE));
+    if (appointmentPage.value > maxPage) {
+      appointmentPage.value = maxPage;
+    }
+  },
+);
+
 watch(period, () => {
   resetAppointmentFilters();
+  resetAppointmentPage();
   loadStats();
 });
 onMounted(loadStats);
@@ -357,10 +391,13 @@ onMounted(loadStats);
           <h2 class="section-title">預約明細</h2>
           <p v-if="hasActiveFilters" class="filter-hint">
             目前篩選後 {{ filteredAppointmentRows.length }} /
-            {{ appointmentRows.length }} 筆，匯出將依此結果
+            {{ appointmentRows.length }} 筆<span class="filter-hint-export"
+              >，匯出將依此結果</span
+            >
           </p>
         </div>
         <el-button
+          class="export-excel-btn"
           type="primary"
           plain
           :loading="exporting"
@@ -370,7 +407,7 @@ onMounted(loadStats);
         </el-button>
       </div>
       <el-table
-        :data="filteredAppointmentRows"
+        :data="paginatedAppointmentRows"
         stripe
         empty-text="尚無預約紀錄"
         row-key="id"
@@ -461,6 +498,14 @@ onMounted(loadStats);
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="filteredAppointmentRows.length > 0"
+        v-model:current-page="appointmentPage"
+        :page-size="APPOINTMENT_PAGE_SIZE"
+        :total="filteredAppointmentRows.length"
+        layout="total, prev, pager, next"
+        class="appointment-pagination"
+      />
     </div>
   </div>
 </template>
@@ -476,6 +521,52 @@ onMounted(loadStats);
 .period-range {
   color: #64748b;
   font-size: 13px;
+}
+
+@media (max-width: 767px) {
+  .stats-toolbar {
+    align-items: stretch;
+  }
+
+  .stats-toolbar .el-radio-group {
+    display: flex;
+    width: 100%;
+  }
+
+  .stats-toolbar .el-radio-button {
+    flex: 1;
+  }
+
+  .stats-toolbar :deep(.el-radio-button__inner) {
+    width: 100%;
+  }
+
+  .period-range {
+    text-align: left;
+  }
+
+  .section-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .export-excel-btn,
+  .filter-hint-export {
+    display: none;
+  }
+
+  .stat-card {
+    min-height: 96px;
+    padding: 14px;
+  }
+
+  .stat-value {
+    font-size: 1.3rem;
+  }
+
+  .trend-collapse-title {
+    flex-wrap: wrap;
+  }
 }
 
 .summary-row {
@@ -535,6 +626,19 @@ onMounted(loadStats);
   margin: 4px 0 0;
   color: #64748b;
   font-size: 13px;
+}
+
+.appointment-pagination {
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 767px) {
+  .appointment-pagination {
+    justify-content: center;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
 }
 
 .trend-collapse {

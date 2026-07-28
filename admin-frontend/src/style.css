@@ -61,17 +61,41 @@ input {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.header-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-toggle {
+  font-size: 20px;
+  color: #334155;
 }
 
 .admin-email {
   color: #64748b;
   font-size: 14px;
   font-weight: 400;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar {
   border-right: 1px solid #e5e7eb;
   background: #fff;
+  flex-shrink: 0;
 }
 
 .brand {
@@ -84,7 +108,12 @@ input {
   border-bottom: 1px solid #e5e7eb;
 }
 
-.sidebar .el-menu {
+.drawer-brand {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.sidebar .el-menu,
+.mobile-nav-drawer .el-menu {
   border-right: 0;
 }
 
@@ -92,13 +121,24 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   border-bottom: 1px solid #e5e7eb;
   background: #fff;
   font-weight: 600;
 }
 
+.admin-main {
+  overflow-x: hidden;
+}
+
 .page-heading {
   margin-bottom: 28px;
+}
+
+.page-heading h1 {
+  margin: 6px 0;
+  font-size: 1.75rem;
+  line-height: 1.25;
 }
 
 .page-heading-row {
@@ -227,7 +267,98 @@ code {
 }
 
 @media (max-width: 767px) {
-  .sidebar {
+  .admin-shell > .el-aside.desktop-sidebar {
+    display: none !important;
+  }
+
+  .header {
+    height: 56px !important;
+    padding: 0 12px !important;
+  }
+
+  .admin-main {
+    padding: 16px 12px !important;
+  }
+
+  .page-heading {
+    margin-bottom: 20px;
+  }
+
+  .page-heading h1 {
+    font-size: 1.4rem;
+  }
+
+  .page-heading-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-heading-row > .el-button {
+    width: 100%;
+  }
+
+  .admin-email {
+    max-width: 120px;
+    font-size: 12px;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .toolbar .el-select,
+  .toolbar .el-button {
+    width: 100%;
+  }
+
+  .module-card {
+    min-height: 0;
+    margin-bottom: 16px;
+  }
+
+  .module-card p {
+    min-height: 0;
+  }
+
+  .login-page {
+    padding: 16px;
+  }
+
+  .login-card h1 {
+    font-size: 24px;
+  }
+
+  /* Tables: allow horizontal scroll without breaking layout */
+  .el-table {
+    width: 100%;
+  }
+
+  .el-dialog {
+    width: min(96vw, 520px) !important;
+    margin-top: 8vh !important;
+  }
+
+  .el-form-item {
+    margin-bottom: 16px;
+  }
+
+  .holiday-form.el-form--inline .el-form-item {
+    display: block;
+    margin-right: 0;
+  }
+
+  .holiday-form .el-input,
+  .holiday-form .el-date-editor {
+    width: 100% !important;
+  }
+  .mobile-nav-drawer .el-drawer__body {
+    padding: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-email {
     display: none;
   }
 }
