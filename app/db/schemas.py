@@ -216,6 +216,11 @@ class AdminStatsOut(BaseModel):
     recent_appointments: List[AdminStatsAppointmentOut] = []
 
 
+class AppointmentExportRequest(BaseModel):
+    period: str = Field(default="month", pattern="^(week|month|all)$")
+    appointment_ids: Optional[List[int]] = None
+
+
 class AdminLogin(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)

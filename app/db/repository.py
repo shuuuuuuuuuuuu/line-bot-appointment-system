@@ -963,14 +963,7 @@ def get_admin_stats(db: Session, period: str = "month") -> schemas.AdminStatsOut
         for a in upcoming_q.options(*_appointment_query_options()).limit(10).all()
     ]
 
-    recent = (
-        db.query(models.Appointment)
-        .options(*_appointment_query_options())
-        .order_by(models.Appointment.created_at.desc())
-        .limit(15)
-        .all()
-    )
-    recent_appointments = [_appointment_to_stats_row(a) for a in recent]
+    recent_appointments = list_admin_appointments_for_export(db, period)
     trend = _build_admin_trend(db, period)
 
     return schemas.AdminStatsOut(
@@ -989,3 +982,28 @@ def get_admin_stats(db: Session, period: str = "month") -> schemas.AdminStatsOut
         upcoming_appointments=upcoming_appointments,
         recent_appointments=recent_appointments,
     )
+
+
+def list_admin_appointments_for_export(db: Session, period: str = "month"):
+    """All appointments in the selected period for Excel export."""
+    if period not in {"week", "month", "all"}:
+        period = "month"
+
+    start, end = _period_bounds(period)
+    query = db.query(models.Appointment).options(*_appointment_query_options())
+
+    if start is not None and end is not None:
+        query = query.filter(
+            (
+                (models.Appointment.service_dateTime >= start)
+                & (models.Appointment.service_dateTime < end)
+            )
+            | (
+                models.Appointment.service_dateTime.is_(None)
+                & (models.Appointment.created_at >= start)
+                & (models.Appointment.created_at < end)
+            )
+        )
+
+    rows = query.order_by(models.Appointment.created_at.desc()).all()
+    return [_appointment_to_stats_row(a) for a in rows]

@@ -3,6 +3,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.admin_auth import (
@@ -13,6 +14,7 @@ from core.admin_auth import (
 from core.database import get_db
 from core.logging import get_logger
 from db import models, repository, schemas
+from services.excel_export_service import build_appointments_workbook
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = get_logger("api.admin")
@@ -290,3 +292,33 @@ def get_admin_stats(
     _: models.Admin = Depends(get_current_admin),
 ):
     return repository.get_admin_stats(db, period=period)
+
+
+@router.post("/stats/appointments/export")
+def export_admin_appointments(
+    data: schemas.AppointmentExportRequest,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    rows = repository.list_admin_appointments_for_export(db, period=data.period)
+    if data.appointment_ids is not None:
+        id_set = set(data.appointment_ids)
+        rows = [row for row in rows if row.id in id_set]
+    stream = build_appointments_workbook(rows)
+    filename = f"appointments_{data.period}.xlsx"
+    logger.info(
+        "管理員匯出預約明細 admin_id=%s period=%s rows=%s filtered=%s",
+        admin.id,
+        data.period,
+        len(rows),
+        data.appointment_ids is not None,
+    )
+    return StreamingResponse(
+        stream,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )

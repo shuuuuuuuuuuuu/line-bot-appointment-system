@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import datetime, timedelta
 
 from core.admin_auth import create_admin_access_token, hash_password
@@ -34,12 +35,18 @@ def _seed(db_session):
     db_session.flush()
 
     now = datetime.now()
+    last_day = monthrange(now.year, now.month)[1]
+    # Keep all seeded appointments inside the current month and in the future
+    anchor = datetime(now.year, now.month, last_day, 10, 0)
+    if anchor <= now:
+        anchor = now + timedelta(hours=1)
+
     paid = models.Appointment(
         client_id=client.id,
         total_price=2000,
         paid=True,
         expired=False,
-        service_dateTime=now + timedelta(days=2),
+        service_dateTime=anchor,
         total_duration=60,
     )
     pending = models.Appointment(
@@ -47,7 +54,7 @@ def _seed(db_session):
         total_price=2000,
         paid=False,
         expired=False,
-        service_dateTime=now + timedelta(days=3),
+        service_dateTime=anchor + timedelta(hours=1),
         total_duration=60,
         payment_proof_received=False,
     )
@@ -56,7 +63,7 @@ def _seed(db_session):
         total_price=2000,
         paid=False,
         expired=False,
-        service_dateTime=now + timedelta(days=4),
+        service_dateTime=anchor + timedelta(hours=2),
         total_duration=60,
         payment_proof_received=True,
     )
@@ -106,3 +113,34 @@ def test_stats_summary(client, db_session):
     assert len(data["by_akashic_service"]) == 1
     assert data["by_akashic_service"][0]["service_name"] == "感情與人際"
     assert data["by_akashic_service"][0]["booking_count"] == 1
+
+
+def test_export_appointments_excel(client, db_session):
+    admin = _seed(db_session)
+    response = client.post(
+        "/api/admin/stats/appointments/export",
+        headers=_auth_header(admin.id),
+        json={"period": "month"},
+    )
+    assert response.status_code == 200
+    assert "spreadsheetml" in response.headers.get("content-type", "")
+    assert response.content[:2] == b"PK"  # xlsx zip header
+
+
+def test_export_appointments_respects_ids(client, db_session):
+    admin = _seed(db_session)
+    listed = client.get(
+        "/api/admin/stats?period=month",
+        headers=_auth_header(admin.id),
+    )
+    rows = listed.json()["recent_appointments"]
+    assert len(rows) == 3
+    keep_id = rows[0]["id"]
+
+    response = client.post(
+        "/api/admin/stats/appointments/export",
+        headers=_auth_header(admin.id),
+        json={"period": "month", "appointment_ids": [keep_id]},
+    )
+    assert response.status_code == 200
+    assert response.content[:2] == b"PK"

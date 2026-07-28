@@ -119,4 +119,16 @@ export async function fetchAdminStats(period = "month") {
   return data;
 }
 
+export async function exportAdminAppointments(period = "month", appointmentIds) {
+  const response = await api.post(
+    "/api/admin/stats/appointments/export",
+    {
+      period,
+      appointment_ids: appointmentIds,
+    },
+    { responseType: "blob" },
+  );
+  return response;
+}
+
 export default api;

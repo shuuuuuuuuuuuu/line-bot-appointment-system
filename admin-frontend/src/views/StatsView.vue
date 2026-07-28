@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
-import { fetchAdminStats } from "../api";
+import { fetchAdminStats, exportAdminAppointments } from "../api";
 import TrendChart from "../components/TrendChart.vue";
 import ServiceBarChart from "../components/ServiceBarChart.vue";
+import ColumnFilterHeader from "../components/ColumnFilterHeader.vue";
 
 const PERIOD_OPTIONS = [
   { label: "本週", value: "week" },
@@ -13,6 +14,7 @@ const PERIOD_OPTIONS = [
 ];
 
 const loading = ref(false);
+const exporting = ref(false);
 const period = ref("month");
 const stats = ref(null);
 /** 預設收合圖表 */
@@ -70,6 +72,93 @@ const summaryCards = computed(() => {
   ];
 });
 
+const appointmentRows = computed(() => stats.value?.recent_appointments || []);
+
+const tableFilters = reactive({
+  client_name: [],
+  category_name: [],
+  service_names: [],
+  payment_proof_received: [],
+  status_label: [],
+});
+
+function uniqueFilterOptions(values) {
+  return [...new Set(values.filter(Boolean))]
+    .sort((a, b) => String(a).localeCompare(String(b), "zh-Hant"))
+    .map((value) => ({ label: value, value }));
+}
+
+const clientFilters = computed(() =>
+  uniqueFilterOptions(appointmentRows.value.map((row) => row.client_name)),
+);
+
+const categoryFilters = computed(() =>
+  uniqueFilterOptions(
+    appointmentRows.value.map((row) => row.category_name || "—"),
+  ),
+);
+
+const serviceFilters = computed(() =>
+  uniqueFilterOptions(
+    appointmentRows.value.flatMap((row) =>
+      row.service_names?.length ? row.service_names : ["—"],
+    ),
+  ),
+);
+
+const paymentFilters = [
+  { label: "已收到", value: "received" },
+  { label: "尚未", value: "pending" },
+];
+
+const statusFilters = computed(() =>
+  uniqueFilterOptions(appointmentRows.value.map((row) => row.status_label)),
+);
+
+const filteredAppointmentRows = computed(() => {
+  let rows = appointmentRows.value;
+
+  if (tableFilters.client_name.length) {
+    rows = rows.filter((row) =>
+      tableFilters.client_name.includes(row.client_name),
+    );
+  }
+
+  if (tableFilters.category_name.length) {
+    rows = rows.filter((row) =>
+      tableFilters.category_name.includes(row.category_name || "—"),
+    );
+  }
+
+  if (tableFilters.service_names.length) {
+    rows = rows.filter((row) => {
+      const names = row.service_names?.length ? row.service_names : ["—"];
+      return names.some((name) => tableFilters.service_names.includes(name));
+    });
+  }
+
+  if (tableFilters.payment_proof_received.length) {
+    rows = rows.filter((row) => {
+      const key = row.payment_proof_received ? "received" : "pending";
+      return tableFilters.payment_proof_received.includes(key);
+    });
+  }
+
+  if (tableFilters.status_label.length) {
+    rows = rows.filter((row) =>
+      tableFilters.status_label.includes(row.status_label),
+    );
+  }
+
+  return rows;
+});
+
+const hasActiveFilters = computed(() =>
+  Object.values(tableFilters).some(
+    (values) => Array.isArray(values) && values.length > 0,
+  ),
+);
+
 function formatMoney(n) {
   return `$${Number(n || 0).toLocaleString("zh-TW")}`;
 }
@@ -105,7 +194,53 @@ async function loadStats() {
   }
 }
 
-watch(period, loadStats);
+async function exportExcel() {
+  if (!filteredAppointmentRows.value.length) {
+    ElMessage.warning("目前沒有可匯出的預約明細");
+    return;
+  }
+
+  exporting.value = true;
+  try {
+    const ids = filteredAppointmentRows.value.map((row) => row.id);
+    const response = await exportAdminAppointments(period.value, ids);
+    const blob = new Blob([response.data], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filterTag = hasActiveFilters.value ? "_已篩選" : "";
+    link.href = url;
+    link.download = `預約明細_${period.value}${filterTag}_${stamp}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+    ElMessage.success(
+      hasActiveFilters.value
+        ? `已匯出篩選後 ${ids.length} 筆`
+        : `已匯出 ${ids.length} 筆`,
+    );
+  } catch (error) {
+    ElMessage.error("匯出失敗");
+  } finally {
+    exporting.value = false;
+  }
+}
+
+function resetAppointmentFilters() {
+  tableFilters.client_name = [];
+  tableFilters.category_name = [];
+  tableFilters.service_names = [];
+  tableFilters.payment_proof_received = [];
+  tableFilters.status_label = [];
+}
+
+watch(period, () => {
+  resetAppointmentFilters();
+  loadStats();
+});
 onMounted(loadStats);
 </script>
 
@@ -217,26 +352,64 @@ onMounted(loadStats);
     </el-row>
 
     <div class="section-row">
-      <h2 class="section-title">預約明細</h2>
+      <div class="section-heading">
+        <div>
+          <h2 class="section-title">預約明細</h2>
+          <p v-if="hasActiveFilters" class="filter-hint">
+            目前篩選後 {{ filteredAppointmentRows.length }} /
+            {{ appointmentRows.length }} 筆，匯出將依此結果
+          </p>
+        </div>
+        <el-button
+          type="primary"
+          plain
+          :loading="exporting"
+          @click="exportExcel"
+        >
+          匯出 Excel
+        </el-button>
+      </div>
       <el-table
-        :data="stats?.recent_appointments || []"
+        :data="filteredAppointmentRows"
         stripe
         empty-text="尚無預約紀錄"
         row-key="id"
       >
         <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="client_name" label="客戶" width="100" />
+        <el-table-column prop="client_name" label="客戶" width="110">
+          <template #header>
+            <ColumnFilterHeader
+              v-model="tableFilters.client_name"
+              label="客戶"
+              :options="clientFilters"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="服務時間" min-width="150">
           <template #default="{ row }">
             {{ formatDateTime(row.service_date_time) }}
           </template>
         </el-table-column>
-        <el-table-column label="分類" width="110">
+        <el-table-column label="分類" width="120">
+          <template #header>
+            <ColumnFilterHeader
+              v-model="tableFilters.category_name"
+              label="分類"
+              :options="categoryFilters"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.category_name || "—" }}
           </template>
         </el-table-column>
         <el-table-column label="項目" min-width="160">
+          <template #header>
+            <ColumnFilterHeader
+              v-model="tableFilters.service_names"
+              label="項目"
+              :options="serviceFilters"
+            />
+          </template>
           <template #default="{ row }">
             {{ (row.service_names || []).join("、") || "—" }}
           </template>
@@ -251,7 +424,14 @@ onMounted(loadStats);
             <span class="note-preview">{{ row.user_message || "—" }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="匯款" width="90">
+        <el-table-column label="匯款" width="100">
+          <template #header>
+            <ColumnFilterHeader
+              v-model="tableFilters.payment_proof_received"
+              label="匯款"
+              :options="paymentFilters"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.payment_proof_received ? "已收到" : "尚未" }}
           </template>
@@ -261,7 +441,14 @@ onMounted(loadStats);
             {{ formatMoney(row.total_price) }}
           </template>
         </el-table-column>
-        <el-table-column label="狀態" width="100">
+        <el-table-column label="狀態" width="110">
+          <template #header>
+            <ColumnFilterHeader
+              v-model="tableFilters.status_label"
+              label="狀態"
+              :options="statusFilters"
+            />
+          </template>
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">
               {{ row.status_label }}
@@ -330,6 +517,24 @@ onMounted(loadStats);
 .section-title {
   margin: 0 0 12px;
   font-size: 1.1rem;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-heading .section-title {
+  margin: 0;
+}
+
+.filter-hint {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .trend-collapse {
