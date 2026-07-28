@@ -64,13 +64,17 @@
           </el-checkbox-group>
         </el-form-item>
 
-        <!-- 問題簡述（Input 框） -->
-        <el-form-item label="問題簡述" v-if="selectedCategoryId === 1">
+        <!-- 問題簡述（阿卡西必填） -->
+        <el-form-item
+          label="問題簡述"
+          required
+          v-if="needsUserMessage"
+        >
           <el-input
             v-model="form.user_message"
             type="textarea"
             :rows="3"
-            placeholder="請簡述您想詢問的問題（若選「其他」請務必填寫）"
+            placeholder="請簡述您想詢問的問題（必填）"
             maxlength="500"
             show-word-limit
           />
@@ -200,6 +204,7 @@ const fetchBusinessSettings = async () => {
 // --- 當類別切換時，取得對應服務 ---
 const handleCategoryChange = async (catId) => {
   form.services = []; // 清空已選服務
+  form.user_message = "";
   servicesList.value = [];
 
   const currentCategory = categories.value.find((c) => c.id === catId);
@@ -309,6 +314,15 @@ const handleSlotClick = async (slot) => {
   }
 };
 
+const selectedCategory = computed(() =>
+  categories.value.find((c) => c.id === selectedCategoryId.value)
+);
+
+const needsUserMessage = computed(() => {
+  const name = selectedCategory.value?.category_name || "";
+  return name.includes("阿卡西");
+});
+
 const canSubmit = computed(() => {
   return (
     form.lastName.trim() !== "" &&
@@ -316,13 +330,10 @@ const canSubmit = computed(() => {
     selectedCategoryId.value !== null &&
     form.services.length > 0 &&
     form.date !== "" &&
-    form.time !== ""
+    form.time !== "" &&
+    (!needsUserMessage.value || form.user_message.trim() !== "")
   );
 });
-
-const selectedCategory = computed(() =>
-  categories.value.find((c) => c.id === selectedCategoryId.value)
-);
 
 const serviceDuration = computed(() => {
   if (!servicesList.value.length || !form.services.length) {

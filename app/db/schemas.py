@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -17,7 +17,18 @@ class AppointmentCreate(BaseModel):
     user_message: Optional[str] = ""
     total_price: int
     total_duration: int
-    service_dateTime: datetime 
+    service_dateTime: datetime
+
+    @field_validator("user_message")
+    @classmethod
+    def strip_user_message(cls, value: Optional[str]) -> str:
+        return (value or "").strip()
+
+    @model_validator(mode="after")
+    def require_message_for_akashic(self):
+        if "阿卡西" in (self.category or "") and not self.user_message:
+            raise ValueError("阿卡西預約須填寫問題簡述")
+        return self
 
 # response
 class Appointment(BaseModel):
