@@ -8,6 +8,7 @@ import ServicesView from "./views/ServicesView.vue";
 import MessagesView from "./views/MessagesView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import StatsView from "./views/StatsView.vue";
+import CouponsView from "./views/CouponsView.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -36,6 +37,11 @@ const router = createRouter({
           path: "services",
           name: "services",
           component: ServicesView,
+        },
+        {
+          path: "coupons",
+          name: "coupons",
+          component: CouponsView,
         },
         {
           path: "messages",

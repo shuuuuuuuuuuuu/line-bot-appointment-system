@@ -68,6 +68,8 @@ class Appointment(Base):
     owner_notified = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
     google_event_id = Column(String(255), nullable=True)
+    coupon_code = Column(String(100), nullable=True)
+    original_price = Column(Integer, nullable=True)
     
     client = relationship("Client", back_populates="appointments")
     items = relationship("AppointmentItem", back_populates="appointment")
@@ -124,3 +126,56 @@ class BusinessHoliday(Base):
     holiday_date = Column(Date, nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(100), unique=True, nullable=False, index=True)
+    # 應付比例：50 表示應付原價的 50%（例：3333 * 50%）
+    discount_percent = Column(Integer, nullable=False)
+    service_slug = Column(String(50), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False, index=True)
+    valid_from = Column(Date, nullable=False)
+    valid_to = Column(Date, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    # 同一活動共用一個 code；上限為活動總名額，每人（LINE）仍限用一次
+    max_uses = Column(Integer, nullable=False, default=100)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    category = relationship("Category")
+    redemptions = relationship("CouponRedemption", back_populates="coupon")
+    eligibilities = relationship(
+        "CouponEligibility", back_populates="coupon", cascade="all, delete-orphan"
+    )
+
+
+class CouponEligibility(Base):
+    """業主手動發放後登錄的合格 LINE 帳號；不在名單內不可套用。"""
+
+    __tablename__ = "coupon_eligibilities"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=False, index=True)
+    line_user_id = Column(String(50), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    coupon = relationship("Coupon", back_populates="eligibilities")
+
+
+class CouponRedemption(Base):
+    __tablename__ = "coupon_redemptions"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=False, index=True)
+    line_user_id = Column(String(50), nullable=False, index=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    coupon = relationship("Coupon", back_populates="redemptions")
+    appointment = relationship("Appointment")

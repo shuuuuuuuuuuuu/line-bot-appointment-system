@@ -1,10 +1,16 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 import json
 from db import models, schemas
 from core.logging import get_logger
+from services.coupon_service import (
+    apply_discount,
+    category_matches_coupon,
+    normalize_coupon_code,
+    parse_coupon_code,
+)
 
 logger = get_logger("repository")
 
@@ -261,24 +267,44 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
         if not db_client:
             db_client = models.Client(line_user_id=data.line_user_id, last_name=data.last_name, first_name=data.first_name)
             db.add(db_client)
-            db.flush() 
-        
+            db.flush()
+
+        original_price = data.total_price
+        final_price = data.total_price
+        coupon_code = normalize_coupon_code(data.coupon_code)
+        coupon = None
+
+        if coupon_code:
+            base_price = _resolve_base_price(db, data.service_items, data.total_price)
+            original_price = base_price
+            coupon, final_price = _validate_coupon_for_use(
+                db,
+                code=coupon_code,
+                line_user_id=data.line_user_id,
+                category=data.category,
+                base_price=base_price,
+            )
+            # 寫回 schema，讓後續 LINE 匯款訊息使用折扣後金額
+            data.total_price = final_price
+
         # 建立 Appointment
         now = datetime.now()
         db_appointment = models.Appointment(
             client_id=db_client.id,
-            total_price=data.total_price,  
-            paid=False,       
-            service_dateTime=data.service_dateTime, 
+            total_price=final_price,
+            paid=False,
+            service_dateTime=data.service_dateTime,
             total_duration=data.total_duration,
             user_message=data.user_message,
             payment_deadline_at=now + timedelta(hours=1),
             payment_proof_received=False,
             payment_reminder_sent=False,
             owner_notified=False,
+            coupon_code=coupon.code if coupon else None,
+            original_price=original_price if coupon else None,
         )
         db.add(db_appointment)
-        db.flush() 
+        db.flush()
 
         for s_name in data.service_items:
             service = db.query(models.Service).filter(models.Service.service_name == s_name).first()
@@ -290,6 +316,15 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
                 db.add(db_item)
             else:
                 logger.warning("找不到服務名稱: %s", s_name)
+
+        if coupon:
+            db.add(
+                models.CouponRedemption(
+                    coupon_id=coupon.id,
+                    line_user_id=data.line_user_id,
+                    appointment_id=db_appointment.id,
+                )
+            )
 
         logger.info("預約建立完成，準備 Commit")
         db.commit()
@@ -1007,3 +1042,376 @@ def list_admin_appointments_for_export(db: Session, period: str = "month"):
 
     rows = query.order_by(models.Appointment.created_at.desc()).all()
     return [_appointment_to_stats_row(a) for a in rows]
+
+
+# --- Coupons ---
+
+def _parse_date(value: str, field_name: str) -> date:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} 格式須為 YYYY-MM-DD") from exc
+
+
+def _coupon_redemption_count(db: Session, coupon_id: int) -> int:
+    return (
+        db.query(func.count(models.CouponRedemption.id))
+        .filter(models.CouponRedemption.coupon_id == coupon_id)
+        .scalar()
+        or 0
+    )
+
+
+def _coupon_eligibility_count(db: Session, coupon_id: int) -> int:
+    return (
+        db.query(func.count(models.CouponEligibility.id))
+        .filter(models.CouponEligibility.coupon_id == coupon_id)
+        .scalar()
+        or 0
+    )
+
+
+def list_coupons(db: Session) -> List[models.Coupon]:
+    return (
+        db.query(models.Coupon)
+        .options(joinedload(models.Coupon.category))
+        .order_by(models.Coupon.created_at.desc(), models.Coupon.id.desc())
+        .all()
+    )
+
+
+def get_coupon_by_id(db: Session, coupon_id: int) -> Optional[models.Coupon]:
+    return (
+        db.query(models.Coupon)
+        .options(joinedload(models.Coupon.category))
+        .filter(models.Coupon.id == coupon_id)
+        .first()
+    )
+
+
+def get_coupon_by_code(db: Session, code: str) -> Optional[models.Coupon]:
+    normalized = normalize_coupon_code(code)
+    if not normalized:
+        return None
+    return (
+        db.query(models.Coupon)
+        .options(joinedload(models.Coupon.category))
+        .filter(models.Coupon.code == normalized)
+        .first()
+    )
+
+
+def coupon_to_admin_out(db: Session, coupon: models.Coupon) -> schemas.CouponAdminOut:
+    return schemas.CouponAdminOut(
+        id=coupon.id,
+        name=coupon.name,
+        code=coupon.code,
+        discount_percent=coupon.discount_percent,
+        service_slug=coupon.service_slug,
+        category_id=coupon.category_id,
+        category_name=coupon.category.category_name if coupon.category else None,
+        valid_from=coupon.valid_from.isoformat(),
+        valid_to=coupon.valid_to.isoformat(),
+        is_active=coupon.is_active,
+        max_uses=coupon.max_uses,
+        redemption_count=_coupon_redemption_count(db, coupon.id),
+        eligibility_count=_coupon_eligibility_count(db, coupon.id),
+        created_at=coupon.created_at,
+    )
+
+
+def create_coupon(db: Session, data: schemas.CouponCreate) -> models.Coupon:
+    code = normalize_coupon_code(data.code)
+    _, service_slug, discount_percent = parse_coupon_code(code)
+    valid_from = _parse_date(data.valid_from, "valid_from")
+    valid_to = _parse_date(data.valid_to, "valid_to")
+    if valid_to < valid_from:
+        raise ValueError("有效期限結束日不可早於開始日")
+
+    category = (
+        db.query(models.Category).filter(models.Category.id == data.category_id).first()
+    )
+    if not category:
+        raise ValueError("折扣項目不存在")
+
+    existing = get_coupon_by_code(db, code)
+    if existing:
+        raise ValueError("此優惠碼已存在")
+
+    coupon = models.Coupon(
+        name=data.name.strip(),
+        code=code,
+        discount_percent=discount_percent,
+        service_slug=service_slug,
+        category_id=data.category_id,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        is_active=data.is_active,
+        max_uses=data.max_uses,
+    )
+    db.add(coupon)
+    db.commit()
+    return get_coupon_by_id(db, coupon.id)
+
+
+def update_coupon(
+    db: Session, coupon_id: int, data: schemas.CouponUpdate
+) -> Optional[models.Coupon]:
+    coupon = get_coupon_by_id(db, coupon_id)
+    if not coupon:
+        return None
+
+    payload = data.model_dump(exclude_unset=True)
+
+    if "name" in payload and payload["name"] is not None:
+        coupon.name = payload["name"].strip()
+
+    if "code" in payload and payload["code"] is not None:
+        code = normalize_coupon_code(payload["code"])
+        _, service_slug, discount_percent = parse_coupon_code(code)
+        other = get_coupon_by_code(db, code)
+        if other and other.id != coupon.id:
+            raise ValueError("此優惠碼已存在")
+        coupon.code = code
+        coupon.service_slug = service_slug
+        coupon.discount_percent = discount_percent
+
+    if "category_id" in payload and payload["category_id"] is not None:
+        category = (
+            db.query(models.Category)
+            .filter(models.Category.id == payload["category_id"])
+            .first()
+        )
+        if not category:
+            raise ValueError("折扣項目不存在")
+        coupon.category_id = payload["category_id"]
+
+    if "valid_from" in payload and payload["valid_from"] is not None:
+        coupon.valid_from = _parse_date(payload["valid_from"], "valid_from")
+    if "valid_to" in payload and payload["valid_to"] is not None:
+        coupon.valid_to = _parse_date(payload["valid_to"], "valid_to")
+    if coupon.valid_to < coupon.valid_from:
+        raise ValueError("有效期限結束日不可早於開始日")
+
+    if "is_active" in payload and payload["is_active"] is not None:
+        coupon.is_active = payload["is_active"]
+    if "max_uses" in payload and payload["max_uses"] is not None:
+        coupon.max_uses = payload["max_uses"]
+
+    db.commit()
+    return get_coupon_by_id(db, coupon_id)
+
+
+def delete_coupon(db: Session, coupon_id: int) -> Optional[str]:
+    coupon = get_coupon_by_id(db, coupon_id)
+    if not coupon:
+        return None
+
+    used = _coupon_redemption_count(db, coupon_id)
+    if used > 0:
+        coupon.is_active = False
+        db.commit()
+        return "disabled"
+
+    db.delete(coupon)
+    db.commit()
+    return "deleted"
+
+
+def _resolve_base_price(
+    db: Session, service_items: List[str], fallback_price: int
+) -> int:
+    if not service_items:
+        return fallback_price
+    prices = []
+    for name in service_items:
+        service = (
+            db.query(models.Service)
+            .filter(models.Service.service_name == name)
+            .first()
+        )
+        if service:
+            prices.append(service.price or 0)
+    if not prices:
+        return fallback_price
+    return max(prices)
+
+
+def _validate_coupon_for_use(
+    db: Session,
+    *,
+    code: str,
+    line_user_id: str,
+    category: str,
+    base_price: int,
+):
+    """Validate coupon usability. Returns (coupon, discounted_price)."""
+    normalized = normalize_coupon_code(code)
+    if not normalized:
+        raise ValueError("請輸入優惠碼")
+
+    try:
+        parse_coupon_code(normalized)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+    coupon = get_coupon_by_code(db, normalized)
+    if not coupon:
+        raise ValueError("找不到此優惠碼")
+
+    if not coupon.is_active:
+        raise ValueError("此優惠碼已停用")
+
+    today = date.today()
+    if today < coupon.valid_from or today > coupon.valid_to:
+        raise ValueError("此優惠碼已過期或尚未生效")
+
+    if not category_matches_coupon(category, coupon):
+        raise ValueError("此優惠碼不適用於目前選擇的服務類別")
+
+    eligible = (
+        db.query(models.CouponEligibility)
+        .filter(
+            models.CouponEligibility.coupon_id == coupon.id,
+            models.CouponEligibility.line_user_id == line_user_id,
+        )
+        .first()
+    )
+    if not eligible:
+        raise ValueError("優惠碼無效")
+
+    redemption_count = _coupon_redemption_count(db, coupon.id)
+    if redemption_count >= coupon.max_uses:
+        raise ValueError("此優惠碼已達使用上限")
+
+    already_used = (
+        db.query(models.CouponRedemption)
+        .filter(
+            models.CouponRedemption.coupon_id == coupon.id,
+            models.CouponRedemption.line_user_id == line_user_id,
+        )
+        .first()
+    )
+    if already_used:
+        raise ValueError("此帳號已使用過此優惠碼")
+
+    discounted = apply_discount(base_price, coupon.discount_percent)
+    return coupon, discounted
+
+
+def validate_coupon(
+    db: Session, data: schemas.CouponValidateRequest
+) -> schemas.CouponValidateOut:
+    coupon, discounted = _validate_coupon_for_use(
+        db,
+        code=data.code,
+        line_user_id=data.line_user_id,
+        category=data.category,
+        base_price=data.base_price,
+    )
+    return schemas.CouponValidateOut(
+        code=coupon.code,
+        name=coupon.name,
+        discount_percent=coupon.discount_percent,
+        original_price=data.base_price,
+        discounted_price=discounted,
+        message="套用成功",
+    )
+
+
+def list_admin_clients(db: Session, q: Optional[str] = None) -> List[models.Client]:
+    query = db.query(models.Client)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.filter(
+            (models.Client.line_user_id.like(like))
+            | (models.Client.last_name.like(like))
+            | (models.Client.first_name.like(like))
+        )
+    return query.order_by(models.Client.id.desc()).limit(200).all()
+
+
+def list_coupon_eligibilities(
+    db: Session, coupon_id: int
+) -> List[schemas.CouponEligibilityOut]:
+    rows = (
+        db.query(models.CouponEligibility)
+        .filter(models.CouponEligibility.coupon_id == coupon_id)
+        .order_by(models.CouponEligibility.created_at.desc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        client = (
+            db.query(models.Client)
+            .filter(models.Client.line_user_id == row.line_user_id)
+            .first()
+        )
+        client_name = None
+        if client:
+            client_name = f"{client.last_name}{client.first_name}"
+        result.append(
+            schemas.CouponEligibilityOut(
+                id=row.id,
+                line_user_id=row.line_user_id,
+                client_name=client_name,
+                created_at=row.created_at,
+            )
+        )
+    return result
+
+
+def add_coupon_eligibilities(
+    db: Session, coupon_id: int, line_user_ids: List[str]
+) -> List[schemas.CouponEligibilityOut]:
+    coupon = get_coupon_by_id(db, coupon_id)
+    if not coupon:
+        raise ValueError("找不到優惠碼")
+
+    cleaned = []
+    seen = set()
+    for raw in line_user_ids:
+        uid = (raw or "").strip()
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        cleaned.append(uid)
+
+    if not cleaned:
+        raise ValueError("請至少提供一個 LINE 使用者 ID")
+
+    existing = {
+        row.line_user_id
+        for row in db.query(models.CouponEligibility)
+        .filter(models.CouponEligibility.coupon_id == coupon_id)
+        .all()
+    }
+    for uid in cleaned:
+        if uid in existing:
+            continue
+        db.add(
+            models.CouponEligibility(
+                coupon_id=coupon_id,
+                line_user_id=uid,
+            )
+        )
+    db.commit()
+    return list_coupon_eligibilities(db, coupon_id)
+
+
+def remove_coupon_eligibility(
+    db: Session, coupon_id: int, eligibility_id: int
+) -> bool:
+    row = (
+        db.query(models.CouponEligibility)
+        .filter(
+            models.CouponEligibility.id == eligibility_id,
+            models.CouponEligibility.coupon_id == coupon_id,
+        )
+        .first()
+    )
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True

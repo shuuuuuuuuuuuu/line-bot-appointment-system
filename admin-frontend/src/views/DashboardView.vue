@@ -17,6 +17,12 @@ const modules = [
     enabled: true,
   },
   {
+    title: "折扣碼",
+    description: "管理活動折扣碼、有效期限與發放名單。",
+    route: "/coupons",
+    enabled: true,
+  },
+  {
     title: "訊息範本",
     description: "管理預約、付款與審核結果的回覆內容。",
     route: "/messages",
@@ -52,7 +58,7 @@ function openModule(module) {
         :xs="24"
         :sm="12"
         :md="12"
-        :lg="6"
+        :lg="8"
       >
         <el-card shadow="hover" class="module-card">
           <h2>{{ module.title }}</h2>

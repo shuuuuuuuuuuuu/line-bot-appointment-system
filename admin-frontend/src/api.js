@@ -131,4 +131,50 @@ export async function exportAdminAppointments(period = "month", appointmentIds) 
   return response;
 }
 
+export async function fetchAdminCoupons() {
+  const { data } = await api.get("/api/admin/coupons");
+  return data;
+}
+
+export async function createCoupon(payload) {
+  const { data } = await api.post("/api/admin/coupons", payload);
+  return data;
+}
+
+export async function updateCoupon(couponId, payload) {
+  const { data } = await api.put(`/api/admin/coupons/${couponId}`, payload);
+  return data;
+}
+
+export async function deleteCoupon(couponId) {
+  const { data } = await api.delete(`/api/admin/coupons/${couponId}`);
+  return data;
+}
+
+export async function fetchAdminClients(q) {
+  const { data } = await api.get("/api/admin/clients", {
+    params: q ? { q } : undefined,
+  });
+  return data;
+}
+
+export async function fetchCouponEligibilities(couponId) {
+  const { data } = await api.get(`/api/admin/coupons/${couponId}/eligibilities`);
+  return data;
+}
+
+export async function addCouponEligibilities(couponId, lineUserIds) {
+  const { data } = await api.post(`/api/admin/coupons/${couponId}/eligibilities`, {
+    line_user_ids: lineUserIds,
+  });
+  return data;
+}
+
+export async function removeCouponEligibility(couponId, eligibilityId) {
+  const { data } = await api.delete(
+    `/api/admin/coupons/${couponId}/eligibilities/${eligibilityId}`,
+  );
+  return data;
+}
+
 export default api;

@@ -146,6 +146,9 @@ docker compose up -d --build
 - `POST /api/admin/login`：帳密登入，取得 JWT。
 - `GET /api/admin/me`：驗證目前管理員身分。
 - `GET/POST /api/admin/services`、`PUT/DELETE /api/admin/services/{id}`：服務項目 CRUD（皆需 `get_current_admin`）。
+- `GET/POST /api/admin/coupons`、`PUT/DELETE /api/admin/coupons/{id}`：折扣碼 CRUD（皆需 `get_current_admin`）。
+- `GET/POST /api/admin/coupons/{id}/eligibilities`、`DELETE .../eligibilities/{id}`：折扣碼發放名單（手動 LINE 發碼後登錄合格帳號）。
+- `GET /api/admin/clients`：既有客戶列表（供發放名單選取）。
 - `GET /api/admin/categories`：管理後台用分類列表。
 - `GET/PUT /api/admin/message-templates`：訊息範本列表與編輯（皆需 `get_current_admin`）。
 - `GET/PUT /api/admin/business-settings`：營業時段、間隔、休假曜日等（皆需 `get_current_admin`）。
@@ -153,6 +156,7 @@ docker compose up -d --build
 - `GET /api/admin/stats`：預約／營收數據總覽（`period=week|month|all`）。
 - `POST /api/admin/stats/appointments/export`：匯出預約明細 Excel（可帶 `appointment_ids` 依篩選結果匯出）。
 - 公開 `GET /business-settings`：LIFF 用來限制可選日期。
+- 公開 `POST /coupons/validate`：預約頁驗證／套用優惠碼（須在發放名單內；否則回傳「優惠碼無效」）。
 - Token payload 含 `type=admin`，與郵件審核連結的 JWT 不相通。
 
 ### 4. 建立管理員帳號
@@ -188,9 +192,10 @@ docker compose exec web pytest
 ```
 用戶 (LINE LIFF)
   → 選擇服務類別 / 項目 / 日期 / 時段
+  → （可選）輸入並套用優惠碼
   → Redis 鎖定時段（10 分鐘）
-  → 提交預約 → MySQL 寫入
-  → LINE 推送付款資訊給用戶
+  → 提交預約 → MySQL 寫入（折扣後金額）
+  → LINE 推送付款資訊給用戶（顯示折扣後費用）
   → Email 通知業主審核
   → 業主點擊核准連結
   → 更新 DB 狀態 + LINE 通知用戶 + Google Calendar 建立事件

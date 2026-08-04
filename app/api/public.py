@@ -117,6 +117,17 @@ def create_appointment(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/coupons/validate", response_model=db.schemas.CouponValidateOut)
+def validate_coupon(
+    data: db.schemas.CouponValidateRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return repository.validate_coupon(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/api/slot/lock")
 async def lock_slot(request: Request, db: Session = Depends(get_db)):
     data = await request.json()

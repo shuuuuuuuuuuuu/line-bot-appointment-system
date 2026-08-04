@@ -17,6 +17,7 @@ const drawerOpen = ref(false);
 const activeMenu = computed(() => {
   if (route.path.startsWith("/stats")) return "stats";
   if (route.path.startsWith("/services")) return "services";
+  if (route.path.startsWith("/coupons")) return "coupons";
   if (route.path.startsWith("/messages")) return "messages";
   if (route.path.startsWith("/settings")) return "settings";
   return "dashboard";
@@ -55,6 +56,8 @@ function onMenuSelect(index) {
     router.push("/stats");
   } else if (index === "services") {
     router.push("/services");
+  } else if (index === "coupons") {
+    router.push("/coupons");
   } else if (index === "messages") {
     router.push("/messages");
   } else if (index === "settings") {
@@ -80,6 +83,7 @@ function logout() {
         <el-menu-item index="dashboard">總覽</el-menu-item>
         <el-menu-item index="stats">數據總覽</el-menu-item>
         <el-menu-item index="services">服務項目</el-menu-item>
+        <el-menu-item index="coupons">折扣碼</el-menu-item>
         <el-menu-item index="messages">訊息範本</el-menu-item>
         <el-menu-item index="settings">營業設定</el-menu-item>
       </el-menu>
@@ -97,6 +101,7 @@ function logout() {
         <el-menu-item index="dashboard">總覽</el-menu-item>
         <el-menu-item index="stats">數據總覽</el-menu-item>
         <el-menu-item index="services">服務項目</el-menu-item>
+        <el-menu-item index="coupons">折扣碼</el-menu-item>
         <el-menu-item index="messages">訊息範本</el-menu-item>
         <el-menu-item index="settings">營業設定</el-menu-item>
       </el-menu>

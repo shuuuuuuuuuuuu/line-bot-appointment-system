@@ -18,11 +18,20 @@ class AppointmentCreate(BaseModel):
     total_price: int
     total_duration: int
     service_dateTime: datetime
+    coupon_code: Optional[str] = None
 
     @field_validator("user_message")
     @classmethod
     def strip_user_message(cls, value: Optional[str]) -> str:
         return (value or "").strip()
+
+    @field_validator("coupon_code")
+    @classmethod
+    def strip_coupon_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @model_validator(mode="after")
     def require_message_for_akashic(self):
@@ -219,6 +228,84 @@ class AdminStatsOut(BaseModel):
 class AppointmentExportRequest(BaseModel):
     period: str = Field(default="month", pattern="^(week|month|all)$")
     appointment_ids: Optional[List[int]] = None
+
+
+class CouponCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    code: str = Field(min_length=3, max_length=100)
+    category_id: int
+    valid_from: str = Field(description="YYYY-MM-DD")
+    valid_to: str = Field(description="YYYY-MM-DD")
+    is_active: bool = True
+    max_uses: int = Field(default=100, ge=1, le=10000)
+
+
+class CouponUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    code: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    category_id: Optional[int] = None
+    valid_from: Optional[str] = Field(default=None, description="YYYY-MM-DD")
+    valid_to: Optional[str] = Field(default=None, description="YYYY-MM-DD")
+    is_active: Optional[bool] = None
+    max_uses: Optional[int] = Field(default=None, ge=1, le=10000)
+
+
+class CouponAdminOut(BaseModel):
+    id: int
+    name: str
+    code: str
+    discount_percent: int
+    service_slug: str
+    category_id: int
+    category_name: Optional[str] = None
+    valid_from: str
+    valid_to: str
+    is_active: bool
+    max_uses: int
+    redemption_count: int = 0
+    eligibility_count: int = 0
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CouponEligibilityOut(BaseModel):
+    id: int
+    line_user_id: str
+    client_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class CouponEligibilityAddRequest(BaseModel):
+    line_user_ids: List[str] = Field(min_length=1)
+
+
+class AdminClientOut(BaseModel):
+    id: int
+    line_user_id: str
+    last_name: str
+    first_name: str
+    create_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CouponValidateRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=100)
+    line_user_id: str = Field(min_length=1, max_length=50)
+    category: str = Field(min_length=1, max_length=50)
+    base_price: int = Field(ge=0)
+
+
+class CouponValidateOut(BaseModel):
+    code: str
+    name: str
+    discount_percent: int
+    original_price: int
+    discounted_price: int
+    message: str
 
 
 class AdminLogin(BaseModel):

@@ -322,3 +322,149 @@ def export_admin_appointments(
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
+
+
+def _coupon_to_admin_out(db: Session, coupon: models.Coupon) -> schemas.CouponAdminOut:
+    return repository.coupon_to_admin_out(db, coupon)
+
+
+@router.get("/coupons", response_model=List[schemas.CouponAdminOut])
+def list_admin_coupons(
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    coupons = repository.list_coupons(db)
+    return [_coupon_to_admin_out(db, coupon) for coupon in coupons]
+
+
+@router.post(
+    "/coupons",
+    response_model=schemas.CouponAdminOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_admin_coupon(
+    data: schemas.CouponCreate,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    try:
+        coupon = repository.create_coupon(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.info(
+        "管理員建立優惠碼 admin_id=%s coupon_id=%s code=%s",
+        admin.id,
+        coupon.id,
+        coupon.code,
+    )
+    return _coupon_to_admin_out(db, coupon)
+
+
+@router.put("/coupons/{coupon_id}", response_model=schemas.CouponAdminOut)
+def update_admin_coupon(
+    coupon_id: int,
+    data: schemas.CouponUpdate,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    try:
+        coupon = repository.update_coupon(db, coupon_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if not coupon:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到優惠碼")
+    logger.info(
+        "管理員更新優惠碼 admin_id=%s coupon_id=%s",
+        admin.id,
+        coupon_id,
+    )
+    return _coupon_to_admin_out(db, coupon)
+
+
+@router.delete("/coupons/{coupon_id}")
+def delete_admin_coupon(
+    coupon_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    result = repository.delete_coupon(db, coupon_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到優惠碼")
+    logger.info(
+        "管理員刪除優惠碼 admin_id=%s coupon_id=%s result=%s",
+        admin.id,
+        coupon_id,
+        result,
+    )
+    if result == "disabled":
+        return {
+            "detail": "優惠碼已有使用紀錄，已改為停用",
+            "action": "disabled",
+        }
+    return {"detail": "優惠碼已刪除", "action": "deleted"}
+
+
+@router.get("/clients", response_model=List[schemas.AdminClientOut])
+def list_admin_clients(
+    q: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    return repository.list_admin_clients(db, q=q)
+
+
+@router.get(
+    "/coupons/{coupon_id}/eligibilities",
+    response_model=List[schemas.CouponEligibilityOut],
+)
+def list_coupon_eligibilities(
+    coupon_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    coupon = repository.get_coupon_by_id(db, coupon_id)
+    if not coupon:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到優惠碼")
+    return repository.list_coupon_eligibilities(db, coupon_id)
+
+
+@router.post(
+    "/coupons/{coupon_id}/eligibilities",
+    response_model=List[schemas.CouponEligibilityOut],
+)
+def add_coupon_eligibilities(
+    coupon_id: int,
+    data: schemas.CouponEligibilityAddRequest,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    try:
+        rows = repository.add_coupon_eligibilities(db, coupon_id, data.line_user_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.info(
+        "管理員新增優惠碼發放名單 admin_id=%s coupon_id=%s count=%s",
+        admin.id,
+        coupon_id,
+        len(data.line_user_ids),
+    )
+    return rows
+
+
+@router.delete("/coupons/{coupon_id}/eligibilities/{eligibility_id}")
+def remove_coupon_eligibility(
+    coupon_id: int,
+    eligibility_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    ok = repository.remove_coupon_eligibility(db, coupon_id, eligibility_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到發放紀錄")
+    logger.info(
+        "管理員移除優惠碼發放名單 admin_id=%s coupon_id=%s eligibility_id=%s",
+        admin.id,
+        coupon_id,
+        eligibility_id,
+    )
+    return {"detail": "已移除", "action": "deleted"}

@@ -113,6 +113,36 @@
           此日期目前無可用時段或為公休日。
         </p>
 
+        <!-- 優惠碼（預約日期區塊下、提交上） -->
+        <el-form-item label="優惠碼">
+          <div class="coupon-row">
+            <el-input
+              v-model="couponInput"
+              placeholder="例：20260802_soundhealing_50"
+              :disabled="!!appliedCoupon"
+              @input="onCouponInputChange"
+              @keyup.enter="applyCoupon"
+            />
+            <el-button
+              v-if="!appliedCoupon"
+              type="primary"
+              plain
+              :loading="couponValidating"
+              :disabled="!couponInput.trim()"
+              @click="applyCoupon"
+            >
+              套用
+            </el-button>
+            <el-button v-else @click="clearCoupon">取消</el-button>
+          </div>
+          <div v-if="appliedCoupon" class="coupon-success">
+            {{ appliedCoupon.message }}
+          </div>
+          <div v-else-if="couponError" class="coupon-error">
+            {{ couponError }}
+          </div>
+        </el-form-item>
+
         <!-- 置中提交按鈕 -->
         <div class="submit-area">
           <el-button
@@ -131,7 +161,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed, onMounted, watch } from "vue";
 import liff from "@line/liff";
 import axios from "axios";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -161,6 +191,10 @@ const selectedCategoryId = ref(null);
 const availableSlots = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
+const couponInput = ref("");
+const couponValidating = ref(false);
+const couponError = ref("");
+const appliedCoupon = ref(null);
 const businessSettings = ref({
   off_weekdays: [4, 5, 6],
   max_advance_days: 30,
@@ -206,6 +240,7 @@ const handleCategoryChange = async (catId) => {
   form.services = []; // 清空已選服務
   form.user_message = "";
   servicesList.value = [];
+  clearCoupon();
 
   const currentCategory = categories.value.find((c) => c.id === catId);
   if (currentCategory?.category_name?.includes("頌缽")) {
@@ -358,6 +393,80 @@ const servicePrice = computed(() => {
   return Math.max(...selected.map((service) => service.price || 0));
 });
 
+const payablePrice = computed(() => {
+  if (appliedCoupon.value) {
+    return appliedCoupon.value.discounted_price;
+  }
+  return servicePrice.value;
+});
+
+watch(
+  () => [servicePrice.value, selectedCategoryId.value],
+  (next, prev) => {
+    if (!appliedCoupon.value) {
+      return;
+    }
+    // 價格或類別變更後需重新套用，避免顯示過期折扣金額
+    if (!prev || next[0] !== prev[0] || next[1] !== prev[1]) {
+      appliedCoupon.value = null;
+      couponError.value = "服務或價格已變更，請重新套用優惠碼";
+    }
+  },
+);
+
+function clearCoupon() {
+  couponInput.value = "";
+  couponError.value = "";
+  appliedCoupon.value = null;
+}
+
+function onCouponInputChange() {
+  couponError.value = "";
+  if (appliedCoupon.value) {
+    appliedCoupon.value = null;
+  }
+}
+
+const applyCoupon = async () => {
+  couponError.value = "";
+  const code = couponInput.value.trim();
+  if (!code) {
+    couponError.value = "請輸入優惠碼";
+    return;
+  }
+  if (!lineUserId.value) {
+    couponError.value = "請先完成 LINE 登入後再套用優惠碼";
+    return;
+  }
+  if (!selectedCategory.value) {
+    couponError.value = "請先選擇服務類別";
+    return;
+  }
+  if (!servicePrice.value) {
+    couponError.value = "請先選擇服務項目";
+    return;
+  }
+
+  couponValidating.value = true;
+  try {
+    const { data } = await api.post("/coupons/validate", {
+      code,
+      line_user_id: lineUserId.value,
+      category: selectedCategory.value.category_name,
+      base_price: servicePrice.value,
+    });
+    appliedCoupon.value = data;
+    couponInput.value = data.code;
+    ElMessage.success(data.message);
+  } catch (error) {
+    appliedCoupon.value = null;
+    const detail = error.response?.data?.detail;
+    couponError.value = detail || "無法辨識或無法使用此優惠碼";
+  } finally {
+    couponValidating.value = false;
+  }
+};
+
 const submitForm = async () => {
   submitting.value = true;
 
@@ -371,9 +480,10 @@ const submitForm = async () => {
     category: currentCategory ? currentCategory.category_name : "",
     service_items: form.services,
     user_message: form.user_message,
-    total_price: servicePrice.value,
+    total_price: payablePrice.value,
     total_duration: serviceDuration.value,
     service_dateTime: `${form.date}T${form.time}:00`,
+    coupon_code: appliedCoupon.value ? appliedCoupon.value.code : null,
   };
 
   try {
@@ -383,7 +493,8 @@ const submitForm = async () => {
       if (liff.isInClient()) liff.closeWindow();
     }, 1000);
   } catch (error) {
-    ElMessage.error("提交失敗");
+    const detail = error.response?.data?.detail;
+    ElMessage.error(detail || "提交失敗");
   } finally {
     submitting.value = false;
   }
@@ -459,6 +570,28 @@ const submitForm = async () => {
   margin-top: 30px;
   display: flex;
   justify-content: center;
+}
+
+.coupon-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.coupon-row .el-input {
+  flex: 1;
+}
+
+.coupon-success {
+  margin-top: 6px;
+  color: #67c23a;
+  font-size: 13px;
+}
+
+.coupon-error {
+  margin-top: 6px;
+  color: #f56c6c;
+  font-size: 13px;
 }
 
 .description-text {
