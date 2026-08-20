@@ -128,6 +128,38 @@ class BusinessHoliday(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class BusinessWeeklyHours(Base):
+    """每週營業範本：weekday 0=週一 … 6=週日。"""
+
+    __tablename__ = "business_weekly_hours"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True)
+    weekday = Column(Integer, nullable=False, unique=True, index=True)
+    is_open = Column(Boolean, nullable=False, default=True)
+    open_hour = Column(Integer, nullable=False, default=9)
+    close_hour = Column(Integer, nullable=False, default=21)
+    time_slots = Column(String(512), nullable=False, default="[]")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class BusinessDateOverride(Base):
+    """特定日期覆寫：可全日休或特別營業時段。"""
+
+    __tablename__ = "business_date_overrides"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True)
+    target_date = Column(Date, nullable=False, unique=True, index=True)
+    is_open = Column(Boolean, nullable=False, default=False)
+    open_hour = Column(Integer, nullable=True)
+    close_hour = Column(Integer, nullable=True)
+    time_slots = Column(String(512), nullable=False, default="[]")
+    note = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Coupon(Base):
     __tablename__ = "coupons"
     __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}

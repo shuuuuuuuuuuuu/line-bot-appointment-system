@@ -246,6 +246,59 @@ def update_admin_business_settings(
     return result
 
 
+@router.put("/business-settings/weekly-hours", response_model=schemas.BusinessSettingsOut)
+def update_admin_weekly_hours(
+    data: schemas.BusinessWeeklyHoursUpdate,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    try:
+        result = repository.update_weekly_hours(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.info("管理員更新每週營業範本 admin_id=%s", admin.id)
+    return result
+
+
+@router.post(
+    "/business-settings/date-overrides",
+    response_model=schemas.BusinessDateOverrideOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_admin_date_override(
+    data: schemas.BusinessDateOverrideCreate,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    try:
+        result = repository.upsert_date_override(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.info(
+        "管理員設定日期覆寫 admin_id=%s date=%s",
+        admin.id,
+        data.target_date,
+    )
+    return result
+
+
+@router.delete("/business-settings/date-overrides/{override_id}")
+def delete_admin_date_override(
+    override_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    deleted = repository.delete_date_override(db, override_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到日期覆寫")
+    logger.info(
+        "管理員刪除日期覆寫 admin_id=%s override_id=%s",
+        admin.id,
+        override_id,
+    )
+    return {"detail": "日期覆寫已刪除"}
+
+
 @router.post(
     "/business-holidays",
     response_model=schemas.BusinessHolidayOut,

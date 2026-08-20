@@ -100,6 +100,23 @@ export async function updateBusinessSettings(payload) {
   return data;
 }
 
+export async function updateWeeklyHours(payload) {
+  const { data } = await api.put("/api/admin/business-settings/weekly-hours", payload);
+  return data;
+}
+
+export async function upsertDateOverride(payload) {
+  const { data } = await api.post("/api/admin/business-settings/date-overrides", payload);
+  return data;
+}
+
+export async function deleteDateOverride(overrideId) {
+  const { data } = await api.delete(
+    `/api/admin/business-settings/date-overrides/${overrideId}`
+  );
+  return data;
+}
+
 export async function createBusinessHoliday(payload) {
   const { data } = await api.post("/api/admin/business-holidays", payload);
   return data;

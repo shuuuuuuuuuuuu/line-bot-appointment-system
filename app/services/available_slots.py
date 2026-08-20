@@ -9,8 +9,6 @@ TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 # 連接redis
 r = redis.StrictRedis(host=settings.REDIS_HOST, port=6379, db=0, decode_responses=True)
 
-DEFAULT_OFF_WEEKDAYS = [4, 5, 6]
-
 
 # 取得該日期所有被暫時佔用的時段
 def get_pending_slots(date_str):
@@ -84,21 +82,19 @@ def get_available_slots_logic(
     db_pending_slots,
     target_date_str,
     *,
+    is_open=True,
     open_hour=9,
     close_hour=21,
+    time_slots=None,
     slot_interval_minutes=60,
     buffer_minutes=60,
-    off_weekdays=None,
-    holiday_dates=None,
     max_advance_days=None,
 ):
-    off_days = list(off_weekdays) if off_weekdays is not None else list(DEFAULT_OFF_WEEKDAYS)
-    holidays = set(holiday_dates or [])
     interval = max(int(slot_interval_minutes or 60), 15)
     buffer = max(int(buffer_minutes or 0), 0)
 
     target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
-    if target_date_str in holidays or target_dt.weekday() in off_days:
+    if not is_open:
         return []
 
     if max_advance_days is not None:
@@ -108,34 +104,39 @@ def get_available_slots_logic(
         if target_dt.date() < today:
             return []
 
-    available_times = []
-    current_time = datetime.strptime(
-        f"{target_date_str} {int(open_hour):02d}:00", "%Y-%m-%d %H:%M"
-    )
-    end_of_day = datetime.strptime(
-        f"{target_date_str} {int(close_hour):02d}:00", "%Y-%m-%d %H:%M"
-    )
+    ranges = list(time_slots or [])
+    if not ranges:
+        ranges = [{"open_hour": int(open_hour), "close_hour": int(close_hour)}]
 
+    available_times = []
     formatted_busy = _format_busy_ranges(
         list(busy_slots or []) + list(confirmed_slots or []) + list(db_pending_slots or []),
         buffer,
     )
 
-    while current_time + timedelta(minutes=interval) <= end_of_day:
-        slot_start = current_time
-        slot_start_str = slot_start.strftime("%H:%M")
-        slot_end = current_time + timedelta(minutes=interval)
-        
-        is_conflict = (
-            any(slot_start < b['end'] and slot_end > b['start'] for b in formatted_busy) or
-            (slot_start_str in pending_slots)
+    for rng in ranges:
+        current_time = datetime.strptime(
+            f"{target_date_str} {int(rng['open_hour']):02d}:00", "%Y-%m-%d %H:%M"
+        )
+        end_of_day = datetime.strptime(
+            f"{target_date_str} {int(rng['close_hour']):02d}:00", "%Y-%m-%d %H:%M"
         )
 
-        if not is_conflict:
-            now_taipei = datetime.now(TAIPEI_TZ).replace(tzinfo=None)
-            if slot_start > now_taipei:
-                available_times.append(slot_start_str)
-        
-        current_time += timedelta(minutes=interval)
+        while current_time + timedelta(minutes=interval) <= end_of_day:
+            slot_start = current_time
+            slot_start_str = slot_start.strftime("%H:%M")
+            slot_end = current_time + timedelta(minutes=interval)
 
-    return available_times
+            is_conflict = (
+                any(slot_start < b['end'] and slot_end > b['start'] for b in formatted_busy) or
+                (slot_start_str in pending_slots)
+            )
+
+            if not is_conflict:
+                now_taipei = datetime.now(TAIPEI_TZ).replace(tzinfo=None)
+                if slot_start > now_taipei and slot_start_str not in available_times:
+                    available_times.append(slot_start_str)
+
+            current_time += timedelta(minutes=interval)
+
+    return sorted(available_times)
