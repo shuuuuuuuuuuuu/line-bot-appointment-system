@@ -9,6 +9,7 @@ import {
   fetchAdminCategories,
   fetchAdminClients,
   fetchAdminCoupons,
+  fetchAdminLineContacts,
   fetchCouponEligibilities,
   removeCouponEligibility,
   updateCoupon,
@@ -27,8 +28,11 @@ const eligibilitySaving = ref(false);
 const eligibilityCoupon = ref(null);
 const eligibilities = ref([]);
 const clientOptions = ref([]);
+const lineContactOptions = ref([]);
 const selectedClientIds = ref([]);
+const selectedLineContactIds = ref([]);
 const clientSearchLoading = ref(false);
+const lineContactSearchLoading = ref(false);
 
 const form = reactive({
   name: "",
@@ -185,11 +189,17 @@ function statusTagType(row) {
 async function openEligibility(row) {
   eligibilityCoupon.value = row;
   selectedClientIds.value = [];
+  selectedLineContactIds.value = [];
   eligibilityVisible.value = true;
   eligibilityLoading.value = true;
   try {
     eligibilities.value = await fetchCouponEligibilities(row.id);
-    clientOptions.value = await fetchAdminClients();
+    const [clients, contacts] = await Promise.all([
+      fetchAdminClients(),
+      fetchAdminLineContacts(),
+    ]);
+    clientOptions.value = clients;
+    lineContactOptions.value = contacts;
   } catch (error) {
     ElMessage.error("無法載入發放名單");
   } finally {
@@ -208,14 +218,31 @@ async function searchClients(query) {
   }
 }
 
+async function searchLineContacts(query) {
+  lineContactSearchLoading.value = true;
+  try {
+    lineContactOptions.value = await fetchAdminLineContacts(query || undefined);
+  } catch (error) {
+    // ignore search errors
+  } finally {
+    lineContactSearchLoading.value = false;
+  }
+}
+
 function clientLabel(client) {
   return `${client.last_name || ""}${client.first_name || ""}`.trim() || "未命名客戶";
 }
 
+function eligibilityDisplayName(row) {
+  return row.client_name || row.display_name || "未知客戶";
+}
+
 async function submitEligibilities() {
-  const merged = [...new Set(selectedClientIds.value || [])];
+  const fromClients = selectedClientIds.value || [];
+  const fromContacts = selectedLineContactIds.value || [];
+  const merged = [...new Set([...fromClients, ...fromContacts])];
   if (!merged.length) {
-    ElMessage.warning("請從既有客戶選取");
+    ElMessage.warning("請選擇要加入發放名單的客戶");
     return;
   }
 
@@ -226,6 +253,7 @@ async function submitEligibilities() {
       merged,
     );
     selectedClientIds.value = [];
+    selectedLineContactIds.value = [];
     ElMessage.success("已加入發放名單");
     await loadCoupons();
   } catch (error) {
@@ -392,7 +420,7 @@ onMounted(async () => {
     >
       <div v-loading="eligibilityLoading">
         <p class="eligibility-intro">
-          手動用 LINE 把折扣碼傳給符合資格的客人後，請從既有客戶加入發放名單。未在名單內的帳號即使知道 code 也無法套用。
+          手動用 LINE 把折扣碼傳給客人後，請加入發放名單。曾預約過的客戶可從「既有客戶」選取；新客戶請請對方先傳任意訊息給官方 LINE 帳號，再從「LINE 互動」選取。
         </p>
 
         <el-form label-position="top">
@@ -404,7 +432,7 @@ onMounted(async () => {
               remote
               clearable
               reserve-keyword
-              placeholder="搜尋客戶名稱"
+              placeholder="搜尋客戶姓名（曾預約過）"
               :remote-method="searchClients"
               :loading="clientSearchLoading"
               style="width: 100%"
@@ -416,6 +444,30 @@ onMounted(async () => {
                 :value="client.line_user_id"
               />
             </el-select>
+          </el-form-item>
+          <el-form-item label="從 LINE 互動選取">
+            <el-select
+              v-model="selectedLineContactIds"
+              multiple
+              filterable
+              remote
+              clearable
+              reserve-keyword
+              placeholder="搜尋 LINE 顯示名稱（請客戶先傳訊給官方帳號）"
+              :remote-method="searchLineContacts"
+              :loading="lineContactSearchLoading"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="contact in lineContactOptions"
+                :key="contact.line_user_id"
+                :label="contact.display_name"
+                :value="contact.line_user_id"
+              />
+            </el-select>
+            <div class="field-hint">
+              客人加好友或傳訊息後會出現在此列表，可直接依 LINE 暱稱選取
+            </div>
           </el-form-item>
         </el-form>
 
@@ -432,7 +484,7 @@ onMounted(async () => {
         <el-table :data="eligibilities" stripe max-height="320">
           <el-table-column prop="client_name" label="姓名" min-width="160">
             <template #default="{ row }">
-              {{ row.client_name || "—" }}
+              {{ eligibilityDisplayName(row) }}
             </template>
           </el-table-column>
           <el-table-column label="操作" width="80" fixed="right">
