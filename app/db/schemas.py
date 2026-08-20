@@ -152,6 +152,76 @@ class BusinessHolidayCreate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=100)
 
 
+class BusinessTimeSlot(BaseModel):
+    open_hour: int = Field(ge=0, le=23)
+    close_hour: int = Field(ge=1, le=24)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.open_hour >= self.close_hour:
+            raise ValueError("開始營業時間須早於結束時間")
+        return self
+
+
+class BusinessWeeklyHoursOut(BaseModel):
+    weekday: int = Field(ge=0, le=6)
+    is_open: bool
+    open_hour: int
+    close_hour: int
+    time_slots: List[BusinessTimeSlot] = []
+
+
+class BusinessWeeklyHoursItem(BaseModel):
+    weekday: int = Field(ge=0, le=6)
+    is_open: bool
+    open_hour: int = Field(ge=0, le=23)
+    close_hour: int = Field(ge=1, le=24)
+    time_slots: List[BusinessTimeSlot] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_hours(self):
+        if self.is_open:
+            if self.time_slots:
+                return self
+            if self.open_hour >= self.close_hour:
+                raise ValueError("開始營業時間須早於結束時間")
+        return self
+
+
+class BusinessWeeklyHoursUpdate(BaseModel):
+    items: List[BusinessWeeklyHoursItem] = Field(min_length=7, max_length=7)
+
+
+class BusinessDateOverrideOut(BaseModel):
+    id: int
+    target_date: str
+    is_open: bool
+    open_hour: Optional[int] = None
+    close_hour: Optional[int] = None
+    time_slots: List[BusinessTimeSlot] = []
+    note: Optional[str] = None
+
+
+class BusinessDateOverrideCreate(BaseModel):
+    target_date: str = Field(description="YYYY-MM-DD")
+    is_open: bool
+    open_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    close_hour: Optional[int] = Field(default=None, ge=1, le=24)
+    time_slots: List[BusinessTimeSlot] = Field(default_factory=list)
+    note: Optional[str] = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_hours(self):
+        if self.is_open:
+            if self.time_slots:
+                return self
+            if self.open_hour is None or self.close_hour is None:
+                raise ValueError("特別營業日須設定開始與結束時間")
+            if self.open_hour >= self.close_hour:
+                raise ValueError("開始營業時間須早於結束時間")
+        return self
+
+
 class BusinessSettingsOut(BaseModel):
     open_hour: int
     close_hour: int
@@ -161,6 +231,8 @@ class BusinessSettingsOut(BaseModel):
     max_advance_days: int
     slot_lock_minutes: int
     holidays: List[BusinessHolidayOut] = []
+    weekly_hours: List[BusinessWeeklyHoursOut] = []
+    date_overrides: List[BusinessDateOverrideOut] = []
 
 
 class BusinessSettingsUpdate(BaseModel):

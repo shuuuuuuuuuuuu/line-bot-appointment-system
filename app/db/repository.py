@@ -5,11 +5,10 @@ from typing import List, Optional
 import json
 from db import models, schemas
 from core.logging import get_logger
-from services.coupon_service import (
-    apply_discount,
-    category_matches_coupon,
-    normalize_coupon_code,
-    parse_coupon_code,
+from services.business_hours import (
+    derive_legacy_fields,
+    is_time_within_resolved_hours,
+    resolve_business_hours_for_date,
 )
 
 logger = get_logger("repository")
@@ -262,6 +261,7 @@ def update_message_template(
 def create_appointment(db: Session, data: schemas.AppointmentCreate):
     try:
         logger.info("開始建立預約")
+        validate_appointment_business_hours(db, data.service_dateTime)
         logger.debug("搜尋 Client: %s", data.line_user_id)
         db_client = db.query(models.Client).filter(models.Client.line_user_id == data.line_user_id).first()
         if not db_client:
@@ -543,7 +543,16 @@ def _appointment_to_busy_range(appointment) -> dict:
     }
 
 
+from services.coupon_service import (
+    apply_discount,
+    category_matches_coupon,
+    normalize_coupon_code,
+    parse_coupon_code,
+)
+
 DEFAULT_OFF_WEEKDAYS = [4, 5, 6]
+DEFAULT_WEEKLY_OPEN_HOUR = 9
+DEFAULT_WEEKLY_CLOSE_HOUR = 21
 
 
 def parse_off_weekdays(raw) -> list[int]:
@@ -560,116 +569,299 @@ def parse_off_weekdays(raw) -> list[int]:
     return list(DEFAULT_OFF_WEEKDAYS)
 
 
+
+
+def _slot_pair_from_item(item):
+    if item is None:
+        return None
+    if isinstance(item, dict):
+        o, c = item.get("open_hour"), item.get("close_hour")
+    elif hasattr(item, "model_dump"):
+        data = item.model_dump()
+        o, c = data.get("open_hour"), data.get("close_hour")
+    else:
+        o = getattr(item, "open_hour", None)
+        c = getattr(item, "close_hour", None)
+    if isinstance(o, int) and isinstance(c, int) and 0 <= o < c <= 24:
+        return int(o), int(c)
+    return None
+
+
+def _normalize_time_slots(time_slots, open_hour: int, close_hour: int):
+    slots = []
+    if isinstance(time_slots, str):
+        try:
+            time_slots = json.loads(time_slots or "[]")
+        except Exception:
+            time_slots = []
+    for item in time_slots or []:
+        pair = _slot_pair_from_item(item)
+        if pair is not None:
+            o, c = pair
+            slots.append({"open_hour": o, "close_hour": c})
+    if not slots and open_hour is not None and close_hour is not None and open_hour < close_hour:
+        slots.append({"open_hour": int(open_hour), "close_hour": int(close_hour)})
+    slots.sort(key=lambda x: x["open_hour"])
+    return slots
+
+
+def _time_slots_to_json(time_slots, open_hour: int, close_hour: int) -> str:
+    return json.dumps(_normalize_time_slots(time_slots, open_hour, close_hour))
+
+
+def _bounds_from_time_slots(time_slots, default_open=9, default_close=21):
+    normalized = _normalize_time_slots(time_slots, default_open, default_close)
+    if not normalized:
+        return default_open, default_close
+    return normalized[0]["open_hour"], normalized[-1]["close_hour"]
+
 def get_or_create_business_settings(db: Session) -> models.BusinessSetting:
     row = (
         db.query(models.BusinessSetting)
         .order_by(models.BusinessSetting.id.asc())
         .first()
     )
-    if row:
-        return row
-    row = models.BusinessSetting(
-        open_hour=9,
-        close_hour=21,
-        slot_interval_minutes=60,
-        buffer_minutes=60,
-        off_weekdays=json.dumps(DEFAULT_OFF_WEEKDAYS),
-        max_advance_days=30,
-        slot_lock_minutes=10,
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
+    if not row:
+        row = models.BusinessSetting(
+            open_hour=DEFAULT_WEEKLY_OPEN_HOUR,
+            close_hour=DEFAULT_WEEKLY_CLOSE_HOUR,
+            slot_interval_minutes=60,
+            buffer_minutes=60,
+            off_weekdays=json.dumps(DEFAULT_OFF_WEEKDAYS),
+            max_advance_days=30,
+            slot_lock_minutes=10,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    ensure_default_weekly_hours(db)
     return row
 
 
-def list_business_holidays(db: Session):
+def ensure_default_weekly_hours(db: Session) -> List[models.BusinessWeeklyHours]:
+    existing = (
+        db.query(models.BusinessWeeklyHours)
+        .order_by(models.BusinessWeeklyHours.weekday.asc())
+        .all()
+    )
+    if existing:
+        return existing
+
+    settings = (
+        db.query(models.BusinessSetting)
+        .order_by(models.BusinessSetting.id.asc())
+        .first()
+    )
+    if not settings:
+        return []
+
+    off_weekdays = parse_off_weekdays(settings.off_weekdays)
+    rows = []
+    for weekday in range(7):
+        is_open = weekday not in off_weekdays
+        row = models.BusinessWeeklyHours(
+            weekday=weekday,
+            is_open=is_open,
+            open_hour=settings.open_hour,
+            close_hour=settings.close_hour,
+            time_slots=_time_slots_to_json([], settings.open_hour, settings.close_hour),
+        )
+        db.add(row)
+        rows.append(row)
+    db.commit()
+    for row in rows:
+        db.refresh(row)
+    return rows
+
+
+def list_weekly_hours(db: Session) -> List[models.BusinessWeeklyHours]:
+    rows = ensure_default_weekly_hours(db)
+    return sorted(rows, key=lambda row: row.weekday)
+
+
+def list_date_overrides(db: Session) -> List[models.BusinessDateOverride]:
     return (
-        db.query(models.BusinessHoliday)
-        .order_by(models.BusinessHoliday.holiday_date.asc())
+        db.query(models.BusinessDateOverride)
+        .order_by(models.BusinessDateOverride.target_date.asc())
         .all()
     )
 
 
-def business_settings_to_out(db: Session) -> schemas.BusinessSettingsOut:
-    row = get_or_create_business_settings(db)
-    holidays = list_business_holidays(db)
-    return schemas.BusinessSettingsOut(
+def _weekly_hours_to_out(rows: List[models.BusinessWeeklyHours]) -> List[schemas.BusinessWeeklyHoursOut]:
+    return [
+        schemas.BusinessWeeklyHoursOut(
+            weekday=row.weekday,
+            is_open=row.is_open,
+            open_hour=row.open_hour,
+            close_hour=row.close_hour,
+            time_slots=_normalize_time_slots(row.time_slots, row.open_hour, row.close_hour),
+        )
+        for row in sorted(rows, key=lambda item: item.weekday)
+    ]
+
+
+def _date_override_to_out(row: models.BusinessDateOverride) -> schemas.BusinessDateOverrideOut:
+    return schemas.BusinessDateOverrideOut(
+        id=row.id,
+        target_date=row.target_date.isoformat(),
+        is_open=row.is_open,
         open_hour=row.open_hour,
         close_hour=row.close_hour,
+        time_slots=_normalize_time_slots(row.time_slots, row.open_hour, row.close_hour) if row.is_open else [],
+        note=row.note,
+    )
+
+
+def _holidays_from_overrides(
+    overrides: List[models.BusinessDateOverride],
+) -> List[schemas.BusinessHolidayOut]:
+    return [
+        schemas.BusinessHolidayOut(
+            id=row.id,
+            holiday_date=row.target_date.isoformat(),
+            name=row.note,
+        )
+        for row in overrides
+        if not row.is_open
+    ]
+
+
+def _sync_legacy_settings_from_weekly(db: Session, weekly_rows: List[models.BusinessWeeklyHours]):
+    settings = get_or_create_business_settings(db)
+    open_hour, close_hour, off_weekdays = derive_legacy_fields(weekly_rows)
+    settings.open_hour = open_hour
+    settings.close_hour = close_hour
+    settings.off_weekdays = json.dumps(off_weekdays)
+    db.commit()
+
+
+def business_settings_to_out(db: Session) -> schemas.BusinessSettingsOut:
+    row = get_or_create_business_settings(db)
+    weekly_rows = list_weekly_hours(db)
+    overrides = list_date_overrides(db)
+    open_hour, close_hour, off_weekdays = derive_legacy_fields(weekly_rows)
+
+    return schemas.BusinessSettingsOut(
+        open_hour=open_hour,
+        close_hour=close_hour,
         slot_interval_minutes=row.slot_interval_minutes,
         buffer_minutes=row.buffer_minutes,
-        off_weekdays=parse_off_weekdays(row.off_weekdays),
+        off_weekdays=off_weekdays,
         max_advance_days=row.max_advance_days,
         slot_lock_minutes=row.slot_lock_minutes,
-        holidays=[
-            schemas.BusinessHolidayOut(
-                id=h.id,
-                holiday_date=h.holiday_date.isoformat(),
-                name=h.name,
-            )
-            for h in holidays
-        ],
+        holidays=_holidays_from_overrides(overrides),
+        weekly_hours=_weekly_hours_to_out(weekly_rows),
+        date_overrides=[_date_override_to_out(item) for item in overrides],
     )
 
 
 def update_business_settings(db: Session, data: schemas.BusinessSettingsUpdate):
     row = get_or_create_business_settings(db)
     payload = data.model_dump(exclude_unset=True)
+    weekly_rows = list_weekly_hours(db)
+    weekly_by_weekday = {item.weekday: item for item in weekly_rows}
 
-    if "off_weekdays" in payload and payload["off_weekdays"] is not None:
-        days = payload["off_weekdays"]
-        if not isinstance(days, list) or any(
-            not isinstance(d, int) or d < 0 or d > 6 for d in days
+    legacy_open = payload.pop("open_hour", None)
+    legacy_close = payload.pop("close_hour", None)
+    legacy_off = payload.pop("off_weekdays", None)
+
+    if legacy_open is not None or legacy_close is not None or legacy_off is not None:
+        open_hour = legacy_open if legacy_open is not None else row.open_hour
+        close_hour = legacy_close if legacy_close is not None else row.close_hour
+        off_weekdays = (
+            legacy_off if legacy_off is not None else parse_off_weekdays(row.off_weekdays)
+        )
+        if open_hour >= close_hour:
+            raise ValueError("開始營業時間須早於結束時間")
+        if not isinstance(off_weekdays, list) or any(
+            not isinstance(day, int) or day < 0 or day > 6 for day in off_weekdays
         ):
             raise ValueError("休假曜日須為 0–6（週一至週日）的整數陣列")
-        payload["off_weekdays"] = json.dumps(sorted(set(days)))
 
-    open_hour = payload.get("open_hour", row.open_hour)
-    close_hour = payload.get("close_hour", row.close_hour)
-    if open_hour >= close_hour:
-        raise ValueError("開始營業時間須早於結束時間")
+        for weekday in range(7):
+            template = weekly_by_weekday[weekday]
+            template.is_open = weekday not in off_weekdays
+            template.open_hour = open_hour
+            template.close_hour = close_hour
+            template.time_slots = _time_slots_to_json([], open_hour, close_hour)
 
     for field, value in payload.items():
         setattr(row, field, value)
 
     db.commit()
-    db.refresh(row)
+    _sync_legacy_settings_from_weekly(db, list(weekly_by_weekday.values()))
     return business_settings_to_out(db)
 
 
-def create_business_holiday(db: Session, data: schemas.BusinessHolidayCreate):
+def update_weekly_hours(db: Session, data: schemas.BusinessWeeklyHoursUpdate):
+    weekly_rows = list_weekly_hours(db)
+    weekly_by_weekday = {item.weekday: item for item in weekly_rows}
+
+    seen = set()
+    for item in data.items:
+        if item.weekday in seen:
+            raise ValueError("每週範本不可有重複的星期")
+        seen.add(item.weekday)
+        template = weekly_by_weekday.get(item.weekday)
+        if template is None:
+            template = models.BusinessWeeklyHours(
+                weekday=item.weekday,
+                time_slots=_time_slots_to_json([], item.open_hour, item.close_hour),
+            )
+            db.add(template)
+            weekly_by_weekday[item.weekday] = template
+        template.is_open = item.is_open
+        slots = _normalize_time_slots(item.time_slots, item.open_hour, item.close_hour)
+        first_open, last_close = _bounds_from_time_slots(slots, item.open_hour, item.close_hour)
+        template.open_hour = first_open
+        template.close_hour = last_close
+        template.time_slots = json.dumps(slots)
+
+    if len(seen) != 7:
+        raise ValueError("每週範本須包含 7 天")
+
+    db.commit()
+    _sync_legacy_settings_from_weekly(db, list(weekly_by_weekday.values()))
+    return business_settings_to_out(db)
+
+
+def upsert_date_override(db: Session, data: schemas.BusinessDateOverrideCreate):
     try:
-        holiday_date = datetime.strptime(data.holiday_date, "%Y-%m-%d").date()
+        target_date = datetime.strptime(data.target_date, "%Y-%m-%d").date()
     except ValueError as exc:
         raise ValueError("日期格式須為 YYYY-MM-DD") from exc
 
-    existing = (
-        db.query(models.BusinessHoliday)
-        .filter(models.BusinessHoliday.holiday_date == holiday_date)
+    row = (
+        db.query(models.BusinessDateOverride)
+        .filter(models.BusinessDateOverride.target_date == target_date)
         .first()
     )
-    if existing:
-        raise ValueError("此日期已設為休假日")
+    if row is None:
+        row = models.BusinessDateOverride(target_date=target_date)
+        db.add(row)
 
-    row = models.BusinessHoliday(
-        holiday_date=holiday_date,
-        name=(data.name or "").strip() or None,
-    )
-    db.add(row)
+    row.is_open = data.is_open
+    if data.is_open:
+        slots = _normalize_time_slots(data.time_slots, data.open_hour, data.close_hour)
+        first_open, last_close = _bounds_from_time_slots(slots, data.open_hour or 9, data.close_hour or 21)
+        row.open_hour = first_open
+        row.close_hour = last_close
+        row.time_slots = json.dumps(slots)
+    else:
+        row.open_hour = None
+        row.close_hour = None
+        row.time_slots = "[]"
+    row.note = (data.note or "").strip() or None
+
     db.commit()
     db.refresh(row)
-    return schemas.BusinessHolidayOut(
-        id=row.id,
-        holiday_date=row.holiday_date.isoformat(),
-        name=row.name,
-    )
+    return _date_override_to_out(row)
 
 
-def delete_business_holiday(db: Session, holiday_id: int) -> bool:
+def delete_date_override(db: Session, override_id: int) -> bool:
     row = (
-        db.query(models.BusinessHoliday)
-        .filter(models.BusinessHoliday.id == holiday_id)
+        db.query(models.BusinessDateOverride)
+        .filter(models.BusinessDateOverride.id == override_id)
         .first()
     )
     if not row:
@@ -677,6 +869,50 @@ def delete_business_holiday(db: Session, holiday_id: int) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+def validate_appointment_business_hours(db: Session, service_datetime: datetime) -> None:
+    settings = get_or_create_business_settings(db)
+    target_date = service_datetime.date()
+    resolved = resolve_business_hours_for_date(db, target_date)
+    if not resolved.is_open:
+        raise ValueError("所選日期非營業日")
+
+    time_str = service_datetime.strftime("%H:%M")
+    if not is_time_within_resolved_hours(
+        resolved,
+        time_str,
+        slot_interval_minutes=settings.slot_interval_minutes,
+    ):
+        raise ValueError("所選時間不在營業時段內")
+
+
+def list_business_holidays(db: Session):
+    return [
+        override
+        for override in list_date_overrides(db)
+        if not override.is_open
+    ]
+
+
+def create_business_holiday(db: Session, data: schemas.BusinessHolidayCreate):
+    override = upsert_date_override(
+        db,
+        schemas.BusinessDateOverrideCreate(
+            target_date=data.holiday_date,
+            is_open=False,
+            note=data.name,
+        ),
+    )
+    return schemas.BusinessHolidayOut(
+        id=override.id,
+        holiday_date=override.target_date,
+        name=override.note,
+    )
+
+
+def delete_business_holiday(db: Session, holiday_id: int) -> bool:
+    return delete_date_override(db, holiday_id)
 
 
 def _period_bounds(period: str):
@@ -1378,7 +1614,7 @@ def add_coupon_eligibilities(
         cleaned.append(uid)
 
     if not cleaned:
-        raise ValueError("請至少提供一個 LINE 使用者 ID")
+        raise ValueError("請至少選擇一位客戶")
 
     existing = {
         row.line_user_id

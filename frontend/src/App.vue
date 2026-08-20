@@ -199,7 +199,37 @@ const businessSettings = ref({
   off_weekdays: [4, 5, 6],
   max_advance_days: 30,
   holidays: [],
+  weekly_hours: [],
+  date_overrides: [],
 });
+
+function jsDateToPyWeekday(date) {
+  return (date.getDay() + 6) % 7;
+}
+
+function resolveDayOpenStatus(date) {
+  const dateStr = toDateStr(date);
+  const override = (businessSettings.value.date_overrides || []).find(
+    (item) => item.target_date === dateStr,
+  );
+  if (override) {
+    return override.is_open;
+  }
+
+  const weekday = jsDateToPyWeekday(date);
+  const weekly = (businessSettings.value.weekly_hours || []).find(
+    (item) => item.weekday === weekday,
+  );
+  if (weekly) {
+    return weekly.is_open;
+  }
+
+  const offJsDays = (businessSettings.value.off_weekdays || []).map(pyWeekdayToJs);
+  const holidaySet = new Set(
+    (businessSettings.value.holidays || []).map((h) => h.holiday_date),
+  );
+  return !offJsDays.includes(date.getDay()) && !holidaySet.has(dateStr);
+}
 
 function pyWeekdayToJs(pyDay) {
   return (pyDay + 1) % 7;
@@ -229,6 +259,8 @@ const fetchBusinessSettings = async () => {
       off_weekdays: response.data.off_weekdays ?? [4, 5, 6],
       max_advance_days: response.data.max_advance_days ?? 30,
       holidays: response.data.holidays ?? [],
+      weekly_hours: response.data.weekly_hours ?? [],
+      date_overrides: response.data.date_overrides ?? [],
     };
   } catch (error) {
     console.error("獲取營業設定失敗:", error);
@@ -292,15 +324,10 @@ const disabledDateLogic = (time) => {
     maxDate.getDate() + (businessSettings.value.max_advance_days || 30),
   );
   const dateStr = toDateStr(time);
-  const offJsDays = (businessSettings.value.off_weekdays || []).map(pyWeekdayToJs);
-  const holidaySet = new Set(
-    (businessSettings.value.holidays || []).map((h) => h.holiday_date),
-  );
   const isPast = time.getTime() < today.getTime();
   const isTooFar = time.getTime() > maxDate.getTime();
-  const isOffDay = offJsDays.includes(time.getDay());
-  const isHoliday = holidaySet.has(dateStr);
-  return isPast || isTooFar || isOffDay || isHoliday;
+  const isClosed = !resolveDayOpenStatus(time);
+  return isPast || isTooFar || isClosed;
 };
 
 const handleDateChange = async (val) => {

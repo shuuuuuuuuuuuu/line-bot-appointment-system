@@ -10,6 +10,7 @@ from core.database import get_db
 from core.logging import get_logger
 from core.security import verify_token
 from db import repository
+from services.business_hours import resolve_business_hours_for_date_str
 from services import google_calendar_service
 from services.appointment_service import process_appointment_approval
 from services.available_slots import (
@@ -59,7 +60,7 @@ def read_slots(date: str, db: Session = Depends(get_db)):
         confirmed_slots = repository.get_confirmed_slots(db, date)
         db_pending_slots = repository.get_db_pending_slots(db, date)
         biz = repository.business_settings_to_out(db)
-        holiday_dates = {h.holiday_date for h in biz.holidays}
+        resolved = resolve_business_hours_for_date_str(db, date)
 
         available = get_available_slots_logic(
             busy_slots,
@@ -67,12 +68,12 @@ def read_slots(date: str, db: Session = Depends(get_db)):
             pending_slots,
             db_pending_slots,
             date,
-            open_hour=biz.open_hour,
-            close_hour=biz.close_hour,
+            is_open=resolved.is_open,
+            open_hour=resolved.open_hour or biz.open_hour,
+            close_hour=resolved.close_hour or biz.close_hour,
+            time_slots=[{"open_hour": slot.open_hour, "close_hour": slot.close_hour} for slot in (resolved.time_slots or [])],
             slot_interval_minutes=biz.slot_interval_minutes,
             buffer_minutes=biz.buffer_minutes,
-            off_weekdays=biz.off_weekdays,
-            holiday_dates=holiday_dates,
             max_advance_days=biz.max_advance_days,
         )
         return {"available_slots": available}
