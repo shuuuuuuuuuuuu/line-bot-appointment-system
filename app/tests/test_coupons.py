@@ -183,7 +183,55 @@ def test_coupon_requires_eligibility_and_matching_category(
     assert booked.json()["total_price"] == 1666
 
 
-def test_expired_coupon_rejected(client, db_session):
+def test_new_customer_via_line_contact(client, db_session):
+    sound, _, _ = _seed_categories(db_session)
+    admin = _create_admin(db_session)
+    headers = _auth_header(admin.id)
+    today = date.today()
+
+    db_session.add(
+        models.LineContact(
+            line_user_id="U_new_customer",
+            display_name="小華",
+        )
+    )
+    db_session.commit()
+
+    created = client.post(
+        "/api/admin/coupons",
+        headers=headers,
+        json={
+            "name": "頌缽療癒體驗活動",
+            "code": "20260802_soundhealing_50",
+            "category_id": sound.id,
+            "valid_from": today.isoformat(),
+            "valid_to": (today + timedelta(days=7)).isoformat(),
+        },
+    )
+    coupon_id = created.json()["id"]
+
+    contacts = client.get("/api/admin/line-contacts", headers=headers)
+    assert contacts.status_code == 200
+    assert any(c["display_name"] == "小華" for c in contacts.json())
+
+    added = client.post(
+        f"/api/admin/coupons/{coupon_id}/eligibilities",
+        headers=headers,
+        json={"line_user_ids": ["U_new_customer"]},
+    )
+    assert added.status_code == 200
+    assert added.json()[0]["display_name"] == "小華"
+
+    validated = client.post(
+        "/coupons/validate",
+        json={
+            "code": "20260802_soundhealing_50",
+            "line_user_id": "U_new_customer",
+            "category": "頌缽",
+            "base_price": 3333,
+        },
+    )
+    assert validated.status_code == 200
     admin = _create_admin(db_session)
     sound, _, _ = _seed_categories(db_session)
     headers = _auth_header(admin.id)

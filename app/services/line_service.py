@@ -3,7 +3,14 @@ import re
 from typing import Optional
 
 from linebot import LineBotApi, WebhookHandler
-from linebot.models import ImageMessage, MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    FollowEvent,
+    ImageMessage,
+    MessageEvent,
+    TextMessage,
+    TextSendMessage,
+)
+
 from core.config import settings
 from core.database import SessionLocal
 from core.logging import get_logger
@@ -74,12 +81,30 @@ def _reply(event, reply_msg: str):
         raise
 
 
+def _record_line_contact(line_user_id: str):
+    """記錄曾與官方帳號互動的 LINE 用戶，供後台發放名單選取。"""
+    if not line_user_id:
+        return
+    display_name = ""
+    try:
+        profile = line_bot_api.get_profile(line_user_id)
+        display_name = profile.display_name or ""
+    except Exception as exc:
+        logger.warning("無法取得 LINE 個人資料 (user_id=%s): %s", line_user_id, exc)
+    db = SessionLocal()
+    try:
+        repository.upsert_line_contact(db, line_user_id, display_name)
+    finally:
+        db.close()
+
+
 def _notify_owner_payment_proof(
     event,
     last_five_digits: str,
     image_bytes: Optional[bytes] = None,
 ):
     line_user_id = event.source.user_id
+    _record_line_contact(line_user_id)
     db = SessionLocal()
     try:
         appointment = repository.get_latest_pending_appointment_by_line_user_id(
@@ -124,15 +149,20 @@ def _notify_owner_payment_proof(
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
+    line_user_id = event.source.user_id
     text = event.message.text.strip()
 
     last_five = extract_last_five_digits(text)
     if last_five:
         _notify_owner_payment_proof(event, last_five)
+        return
+
+    _record_line_contact(line_user_id)
 
 
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
+    _record_line_contact(event.source.user_id)
     try:
         image_bytes = _download_line_image(event.message.id)
         ocr_text = extract_text_from_image(image_bytes)
@@ -149,6 +179,11 @@ def handle_image_message(event):
         SCREENSHOT_LAST_FIVE,
         image_bytes=image_bytes,
     )
+
+
+@handler.add(FollowEvent)
+def handle_follow(event):
+    _record_line_contact(event.source.user_id)
 
 
 def send_payment_instruction(data: db.schemas.AppointmentCreate):
