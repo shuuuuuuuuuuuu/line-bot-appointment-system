@@ -232,6 +232,9 @@ def test_new_customer_via_line_contact(client, db_session):
         },
     )
     assert validated.status_code == 200
+
+
+def test_expired_coupon_rejected(client, db_session):
     admin = _create_admin(db_session)
     sound, _, _ = _seed_categories(db_session)
     headers = _auth_header(admin.id)

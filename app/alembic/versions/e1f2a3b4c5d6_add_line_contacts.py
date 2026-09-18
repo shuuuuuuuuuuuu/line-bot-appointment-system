@@ -1,7 +1,7 @@
 """add line_contacts for coupon eligibility picker
 
 Revision ID: e1f2a3b4c5d6
-Revises: d0e1f2a3b4c5
+Revises: a3b4c5d6e7f8
 Create Date: 2026-08-20 15:05:00.000000
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ from sqlalchemy import inspect
 
 
 revision: str = "e1f2a3b4c5d6"
-down_revision: Union[str, None] = "d0e1f2a3b4c5"
+down_revision: Union[str, None] = "a3b4c5d6e7f8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
