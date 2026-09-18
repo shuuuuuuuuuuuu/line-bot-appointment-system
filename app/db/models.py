@@ -211,3 +211,15 @@ class CouponRedemption(Base):
 
     coupon = relationship("Coupon", back_populates="redemptions")
     appointment = relationship("Appointment")
+
+
+class LineContact(Base):
+    """曾與官方 LINE 互動的用戶（傳訊息或加入好友），供發放名單選取。"""
+
+    __tablename__ = "line_contacts"
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = Column(Integer, primary_key=True)
+    line_user_id = Column(String(50), unique=True, nullable=False, index=True)
+    display_name = Column(String(100), nullable=False, default="")
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

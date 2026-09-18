@@ -268,6 +268,11 @@ def create_appointment(db: Session, data: schemas.AppointmentCreate):
             db_client = models.Client(line_user_id=data.line_user_id, last_name=data.last_name, first_name=data.first_name)
             db.add(db_client)
             db.flush()
+            upsert_line_contact(
+                db,
+                data.line_user_id,
+                f"{data.last_name}{data.first_name}",
+            )
 
         original_price = data.total_price
         final_price = data.total_price
@@ -1583,14 +1588,21 @@ def list_coupon_eligibilities(
             .filter(models.Client.line_user_id == row.line_user_id)
             .first()
         )
+        contact = (
+            db.query(models.LineContact)
+            .filter(models.LineContact.line_user_id == row.line_user_id)
+            .first()
+        )
         client_name = None
         if client:
             client_name = f"{client.last_name}{client.first_name}"
+        display_name = contact.display_name if contact else None
         result.append(
             schemas.CouponEligibilityOut(
                 id=row.id,
                 line_user_id=row.line_user_id,
                 client_name=client_name,
+                display_name=display_name,
                 created_at=row.created_at,
             )
         )
@@ -1651,3 +1663,35 @@ def remove_coupon_eligibility(
     db.delete(row)
     db.commit()
     return True
+
+
+def upsert_line_contact(
+    db: Session, line_user_id: str, display_name: str = ""
+) -> models.LineContact:
+    name = (display_name or "").strip()
+    row = (
+        db.query(models.LineContact)
+        .filter(models.LineContact.line_user_id == line_user_id)
+        .first()
+    )
+    if row:
+        if name:
+            row.display_name = name
+        row.last_seen_at = datetime.now()
+    else:
+        row = models.LineContact(
+            line_user_id=line_user_id,
+            display_name=name or "LINE 用戶",
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_line_contacts(db: Session, q: Optional[str] = None) -> List[models.LineContact]:
+    query = db.query(models.LineContact)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.filter(models.LineContact.display_name.like(like))
+    return query.order_by(models.LineContact.last_seen_at.desc()).limit(200).all()

@@ -346,6 +346,7 @@ class CouponEligibilityOut(BaseModel):
     id: int
     line_user_id: str
     client_name: Optional[str] = None
+    display_name: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
@@ -359,6 +360,15 @@ class AdminClientOut(BaseModel):
     last_name: str
     first_name: str
     create_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LineContactOut(BaseModel):
+    line_user_id: str
+    display_name: str
+    last_seen_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

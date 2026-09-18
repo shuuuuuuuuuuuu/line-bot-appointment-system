@@ -175,6 +175,13 @@ export async function fetchAdminClients(q) {
   return data;
 }
 
+export async function fetchAdminLineContacts(q) {
+  const { data } = await api.get("/api/admin/line-contacts", {
+    params: q ? { q } : undefined,
+  });
+  return data;
+}
+
 export async function fetchCouponEligibilities(couponId) {
   const { data } = await api.get(`/api/admin/coupons/${couponId}/eligibilities`);
   return data;

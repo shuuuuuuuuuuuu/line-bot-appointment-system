@@ -466,6 +466,15 @@ def list_admin_clients(
     return repository.list_admin_clients(db, q=q)
 
 
+@router.get("/line-contacts", response_model=List[schemas.LineContactOut])
+def list_line_contacts(
+    q: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(get_current_admin),
+):
+    return repository.list_line_contacts(db, q=q)
+
+
 @router.get(
     "/coupons/{coupon_id}/eligibilities",
     response_model=List[schemas.CouponEligibilityOut],
